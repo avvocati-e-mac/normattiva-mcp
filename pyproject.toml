@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "normattiva-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI e server MCP per leggere, verificare e citare norme italiane da Normattiva.it"
 readme = "README.md"
 license = { text = "MIT" }
