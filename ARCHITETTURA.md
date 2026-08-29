@@ -36,7 +36,24 @@ una riga di responsabilità ciascuno, mano a mano che nascono.)*
 
 ## La grammatica dell'URN {#urn}
 
-*(da riempire al branch `grammatica-urn`.)*
+Due moduli, senza rete:
+
+- **`estensioni.py`** — l'enum `Estensione` (bis, ter, ... viciesquinquies),
+  UNA sola sorgente. Nel progetto di ricerca da cui questo pacchetto è
+  portato, due elenchi scritti a mano divergevano su sei grafie; qui chi
+  costruisce e chi legge un URN importano lo stesso enum, quindi il difetto
+  non può ripresentarsi.
+- **`urn.py`** — il tipo `Urn` (immutabile, `frozen=True`) e la funzione
+  `analizza()`. Ogni forma che l'API risponderebbe 400 (comma, lettera,
+  partizione diversa dall'articolo, estensione con trattino, `!vig=` vuoto)
+  solleva `UrnNonValido` con un messaggio che nomina la causa — mai
+  silenziosamente accettata o corretta. Le regole sono misurate in
+  `docs/MISURE.md` §3, citate nel codice riga per riga.
+
+`Urn.permalink` costruisce il link cliccabile verso il portale, `Urn.stringa`
+la forma canonica da passare all'API. `Urn.con_vigenza()` produce un URN
+**nuovo** senza toccare l'originale — usato dalla ricaduta automatica su un
+articolo abrogato (branch `client`).
 
 ## Le trappole misurate {#trappole}
 
