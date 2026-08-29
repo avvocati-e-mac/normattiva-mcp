@@ -9,10 +9,12 @@ Gli ancoraggi sono stabili e citabili da altri documenti: `#figura`,
 `#strati`, `#urn`, `#trappole`, `#guardiani`, `#fonti`, `#due-porte`,
 `#budget`, `#limiti`, `#prove`.
 
-Stato: **impianto iniziale**. Le sezioni sotto sono scheletri: si riempiono
-di sostanza mano a mano che il branch corrispondente esiste, mai in anticipo
-— un documento che descrive codice non ancora scritto è più fuorviante di un
-documento vuoto.
+Stato: **CLI e server MCP funzionanti, v0.1.0 pubblicata**. Le sezioni sotto
+si riempiono di sostanza mano a mano che il branch corrispondente esiste,
+mai in anticipo — un documento che descrive codice non ancora scritto è
+più fuorviante di un documento vuoto. Restano scheletro solo `#trappole`,
+`#limiti` e `#prove` (rimandano a `docs/MISURE.md` e `docs/LIMITI.md` per
+la sostanza già scritta lì).
 
 ## La figura {#figura}
 
@@ -44,9 +46,10 @@ avvocato ──chiede──▶  LLM (anche debole, es. DeepSeek 4 flash)
 | `citazione.py` | resa Markdown del link + attribuzione, un punto solo per CLI e MCP |
 | `config.py` | configurazione da ambiente (solo il timeout: nessuna chiave richiesta) |
 | `cli.py` | la porta da terminale → `#due-porte` |
+| `descrizioni.py` | testi dei quattro strumenti MCP e istruzioni del server, sotto il tetto di `#budget` |
+| `mcp_server.py` | la porta MCP → `#due-porte` |
 
-*(da completare ai branch successivi: `ricerca.py`, `descrizioni.py`,
-`mcp_server.py`.)*
+*(da completare al branch successivo: `ricerca.py`.)*
 
 ## La ricaduta a vigenza passata {#vigenza}
 
@@ -228,13 +231,27 @@ ancora scritto, e arriva al branch `ricerca` successivo — il test "il
 server espone N strumenti" (`tests/test_mcp_server.py`) dichiara 4, da
 alzare a 5 in quel branch.
 
-Errori sanificati con lo stesso principio del gemello `mcp-bdm`: un errore
-di dominio (`NormattivaErrore`, `RiferimentoSconosciuto`,
-`FonteNonDisponibileErrore`, `UrnNonValido`) porta già un messaggio scritto
-per un modello o un avvocato e viaggia tale e quale; qualunque altra
-eccezione esce come `ErroreInternoMcp` con `type(exc).__name__` più un testo
-nostro, mai `str(exc)` — potrebbe contenere un frammento della risposta di
-Normattiva.
+**Errori sanificati, ma soprattutto tradotti in `ToolError`.** Il principio
+è lo stesso del gemello `mcp-bdm` (un errore di dominio porta già un
+messaggio per un modello o un avvocato, mai `str(exc)` grezzo per gli
+imprevisti), ma qui c'è un vincolo in più, scoperto provando il server a
+mano da Claude Desktop il 29/08/2026, non dai test: l'SDK MCP (`mcp`
+2.1.1, `mcp.server.mcpserver.tools.base.Tool.run`) tratta come **crash
+silenzioso** qualunque eccezione che non sia una sua `ToolError` — il
+modello legge solo `"Error executing tool <nome>"`, il messaggio scritto
+apposta sparisce. Ognuno dei quattro strumenti passa quindi da
+`_traduci_errori` (decoratore applicato fra `@server.tool(...)` e `async
+def`, avvolge l'INTERO corpo, non solo la parte di rete — `risolvi_riferimento`
+e `analizza_urn` sollevano i loro errori prima di toccare la rete): un
+errore di dominio (`NormattivaErrore`, `RiferimentoSconosciuto`,
+`FonteNonDisponibileErrore`, `UrnNonValido`) diventa `ToolError(str(exc))`
+(messaggio conservato); qualunque altra eccezione diventa un `ToolError`
+col solo `type(exc).__name__` più un testo nostro, mai `str(exc)` — un
+messaggio di libreria potrebbe citare un frammento della risposta di
+Normattiva. **Un quinto strumento senza questo decoratore ripete il bug in
+silenzio**: nessun test che chiami la funzione direttamente lo scopre se
+non passa per l'SDK vero (`tests/test_mcp_server.py` lo verifica proprio
+perché chiama la funzione già decorata).
 
 **Ogni avviso non bloccante finisce in un campo `avvisi`/`avviso` come
 frase leggibile**, mai solo in un campo fratello strutturato ignorabile
