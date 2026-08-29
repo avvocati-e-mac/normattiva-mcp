@@ -82,6 +82,25 @@ class TestCodiciConAllegato:
         assert isinstance(esito, CorpoArticolo)
         assert "Responsabilità del vettore" in esito.testo
 
+    def test_primo_articolo_di_un_codice_non_e_scambiato_per_preambolo(self) -> None:
+        """Cattura reale, 29/08/2026: il PRIMO articolo di un codice
+        storico porta il titolo dell'atto prima dell'heading ("CODICE
+        CIVILE Art. 1. (Capacità giuridica)..."), non "Art. 1." da
+        subito. Regressione trovata provando `norm verifica --tutte` a
+        mano: 6 fonti su 47 (tutte quelle con allegato) venivano
+        classificate come preambolo sul loro articolo di controllo."""
+        corpo = _carica("reale-atto-cc-1-primo-articolo-codice.json")
+        nodo = nodo_utile(corpo)
+        assert nodo is not None
+        esito = analizza(nodo.articolo_html, richiesto=Articolo(numero=1))
+        assert isinstance(esito, CorpoArticolo)
+        assert esito.heading == "Art. 1"
+        assert esito.testo.startswith("Art. 1")
+        assert "Capacità giuridica" in esito.testo
+        # Il titolo dell'atto che precedeva l'heading non deve comparire
+        # nel testo restituito.
+        assert not esito.testo.upper().startswith("CODICE CIVILE")
+
 
 class TestFormaLista:
     """Cattura reale: art. 42 TUEL, `data.atto = null` e `data.lista` con

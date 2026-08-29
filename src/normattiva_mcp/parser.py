@@ -134,7 +134,17 @@ def analizza(html_grezzo: str, richiesto: Articolo) -> Esito:
     #    compare — dal testo stesso, che negli articoli veri comincia con
     #    "Art. <N>". La seconda via non è un ripiego permissivo: serve solo
     #    a trovare il numero, che viene comunque confrontato.
-    heading = _heading(corpo_html) or _heading_dal_testo(testo)
+    heading = _heading(corpo_html)
+    if heading is None:
+        heading = _heading_dal_testo(testo)
+        if heading is not None:
+            # Il primo articolo di un codice porta il titolo dell'atto
+            # prima dell'heading ("CODICE CIVILE Art. 1. ..."): si taglia
+            # tutto ciò che precede "Art.", come già si fa per il
+            # preambolo di un intero decreto.
+            indice_heading = testo.find(heading.testo)
+            if indice_heading > 0:
+                testo = testo[indice_heading:]
     if heading is None:
         # 3. Nessun numero d'articolo da nessuna parte = preambolo.
         return Preambolo(caratteri=len(testo), incipit=testo[:120])
@@ -248,10 +258,48 @@ def _heading(frammento_html: str) -> _Heading | None:
     return _heading_da_testo(_testo_semplice(grezzo))
 
 
+_FINESTRA_RIPIEGO_HEADING = 200
+"""Quanto avanti cercare "Art." nel ripiego, quando non è al carattere 0.
+
+Scoperto provando `norm verifica --tutte` a mano sui codici storici: per
+il PRIMO articolo di un codice (es. art. 1 c.c.), il testo comincia con
+il titolo dell'atto prima dell'heading — "CODICE CIVILE Art. 1. (Capacità
+giuridica)...", non "Art. 1." da subito. Il titolo può essere lungo: per
+la Legge Fallimentare sono tre righe ("DISCIPLINA DEL FALLIMENTO, DEL
+CONCORDATO PREVENTIVO, DELL'AMMINISTRAZIONE CONTROLLATA E DELLA
+LIQUIDAZIONE COATTA AMMINISTRATIVA"), 130 caratteri prima di "Art. 1.".
+200 lascia margine restando ben sotto la soglia di 400 caratteri del
+guardiano del preambolo (_FINESTRA_DEL_PREAMBOLO), così le due ricerche
+non si sovrappongono in modo ambiguo.
+
+Senza questa finestra, 6 delle 47 fonti verificate (tutte quelle con
+allegato: Legge Fallimentare, Codice Civile, C.P.C., Codice Penale, il
+Processo Amministrativo, l'Avvocatura dello Stato) venivano classificate
+come "preambolo" sul loro articolo di controllo — un falso allarme di
+`norm verifica`, non un vero errore della tabella."""
+
+
 def _heading_dal_testo(testo: str) -> _Heading | None:
     """Il ripiego: l'articolo vero comincia con "Art. 2043." anche quando
-    la classe non compare nel markup che ci è stato dato."""
-    return _heading_da_testo(testo[:40])
+    la classe non compare nel markup che ci è stato dato — salvo per il
+    primo articolo di un codice, dove precede il titolo dell'atto (vedi
+    _FINESTRA_RIPIEGO_HEADING). Si cerca "Art" case-insensitive in quella
+    finestra, non solo al carattere 0, ma sempre a inizio di una parola
+    (preceduto da inizio stringa o spazio) per non confondere un rinvio
+    normativo incidentale con l'heading vero.
+    """
+    diretto = _heading_da_testo(testo[:40])
+    if diretto is not None:
+        return diretto
+
+    finestra = testo[:_FINESTRA_RIPIEGO_HEADING]
+    for indice in range(1, len(finestra) - 2):
+        precedente = finestra[indice - 1]
+        if precedente.isspace() and finestra[indice : indice + 3].lower() == "art":
+            candidato = _heading_da_testo(finestra[indice : indice + 40])
+            if candidato is not None:
+                return candidato
+    return None
 
 
 _SEPARATORI_ESTENSIONE = frozenset({"-", " ", ".", " "})

@@ -41,9 +41,12 @@ avvocato ──chiede──▶  LLM (anche debole, es. DeepSeek 4 flash)
 | `esiti.py` | gli esiti pubblici (`Articolo`, `Abrogato`, `Preambolo`), la busta `trust` e il sanificatore |
 | `errori.py` | le eccezioni tipizzate del client, con messaggi scritti per un LLM o un avvocato |
 | `client.py` | HTTP: un solo endpoint, i tre 404, il 500 "servizio giù", il circuit breaker, la ricaduta su vigenza |
+| `citazione.py` | resa Markdown del link + attribuzione, un punto solo per CLI e MCP |
+| `config.py` | configurazione da ambiente (solo il timeout: nessuna chiave richiesta) |
+| `cli.py` | la porta da terminale → `#due-porte` |
 
-*(da completare ai branch successivi: `ricerca.py`, `citazione.py`,
-`descrizioni.py`, `mcp_server.py`, `cli.py`.)*
+*(da completare ai branch successivi: `ricerca.py`, `descrizioni.py`,
+`mcp_server.py`.)*
 
 ## La ricaduta a vigenza passata {#vigenza}
 
@@ -183,8 +186,33 @@ sbagliata, arriva allo stesso punto.)*
 
 ## Le due porte {#due-porte}
 
-*(da riempire ai branch `cli` e `mcp`: cosa sta nel tool MCP, cosa nella
-risposta, perché CLI e server non si chiamano fra loro.)*
+`cli.py` è la porta da terminale: comandi Typer sottili che chiamano gli
+stessi moduli di dominio del server MCP (`lookup.py`, `client.py`,
+`fonti.py`, `citazione.py`) — non decide nulla che non sia già deciso lì.
+Un solo punto di costruzione del client (`_nuovo_client()`), sostituibile
+per intero nei test senza dover patchare `httpx.Client` dentro `client.py`.
+
+Comandi: `leggi` (testo verificato), `link` (citazione Markdown, verifica
+di default), `urn` (legge un URN già in mano), `fonti` (elenca o cerca
+nella tabella), `doctor` (sonda **specificamente** `dettaglio-atto-urn`,
+non un endpoint qualsiasi — l'avaria del 29/08/2026 ha colpito solo
+quello mentre il resto rispondeva), `verifica --tutte` (l'unico modo di
+controllare l'intera tabella contro l'API).
+
+**`norm verifica` e `norm fonti-aggiungi` esistono solo qui, mai come
+strumento MCP**: fanno decine di richieste e non devono poter essere
+scatenate da un modello.
+
+Regola di sicurezza scoperta provando i comandi a mano: **ogni testo che
+può contenere caratteri arbitrari** (un errore che cita il dump di
+Normattiva, il messaggio di un articolo abrogato, la citazione Markdown
+stessa) **deve passare da `_remoto()`** prima di `Console.print` — senza,
+Rich interpreta `[...]` come un tag di stile sconosciuto e lo scarta in
+silenzio. `_stampa_errore()` centralizza questa regola per gli errori;
+`link` usa `markup=False` perché la citazione Markdown *è* fatta di
+parentesi quadre.
+
+*(Il server MCP, `mcp_server.py`, arriva al branch `mcp`.)*
 
 ## Il budget del modello debole {#budget}
 

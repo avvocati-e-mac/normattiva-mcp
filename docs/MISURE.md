@@ -234,6 +234,31 @@ come "il servizio è giù adesso", mai come "la norma non esiste", senza
 ritentativi automatici (che rischierebbero di aggravare un'eventuale causa
 reale di rate-limit, anche se qui non ne abbiamo trovata).
 
+### 7.1 Seconda osservazione, stesso giorno: avaria più estesa, tutto il dominio
+
+Circa due ore dopo la prima avaria (29/08/2026, verso le 12:50), l'intero
+dominio `normattiva.it` — portale pubblico incluso, non solo
+`api.normattiva.it` — ha smesso di rispondere del tutto: connessioni TCP
+in timeout (`curl` con `-m 10` va in errore 28, "Connection timed out"),
+non un errore applicativo. Confermato con `curl` puro (non solo con
+questo client), su tre endpoint diversi (portale, `tipologiche/estensioni`,
+`dettaglio-atto-urn`) e verificando che la rete generale funzionasse
+(altri domini, es. google.com, rispondevano normalmente nello stesso
+istante).
+
+Il client (`ClienteNormattiva`, timeout 15 s) si è comportato come
+progettato: dopo 3 tentativi da 15 s ciascuno più il backoff, ha aperto il
+circuito e restituito un messaggio chiaro ("Normattiva è stata sospesa
+dopo guasti ripetuti: riprova fra 60 s") invece di restare appeso
+indefinitamente — verificato con `norm leggi` e `norm doctor` durante
+l'avaria reale, non solo con fixture.
+
+**Non è chiaro se questa seconda avaria sia collegata alla prima o un
+evento distinto** (manutenzione più ampia? un problema di rete più a
+monte?). Non cambia la conclusione operativa: timeout esplicito, nessun
+ritentativo infinito, messaggio che dice "il servizio non risponde ora",
+mai "la norma non esiste".
+
 ## 8. Prestazioni generali
 
 ~800 richieste reali documentate fra agosto e il 29 agosto 2026: mediana
