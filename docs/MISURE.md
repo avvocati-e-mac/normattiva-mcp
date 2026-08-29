@@ -259,6 +259,16 @@ monte?). Non cambia la conclusione operativa: timeout esplicito, nessun
 ritentativo infinito, messaggio che dice "il servizio non risponde ora",
 mai "la norma non esiste".
 
+**Riprodotto anche con un browser Chrome reale** (non solo `curl`/`httpx`):
+la navigazione a `https://www.normattiva.it` non completa, il tab torna a
+`chrome://newtab/` — sintomo tipico di un fallimento di risoluzione
+DNS/connessione, non un errore applicativo del sito. Conferma che non è
+un difetto specifico di questo client HTTP. **Resta non isolato se sia
+un'avaria reale del servizio o un problema di rete/DNS locale alla
+macchina/rete usata per lo sviluppo**: servirebbe un secondo host su una
+rete diversa per distinguere le due ipotesi. Ancora in corso ~25 minuti
+dopo la prima osservazione (verificato per l'ultima volta alle 13:15).
+
 ## 8. Prestazioni generali
 
 ~800 richieste reali documentate fra agosto e il 29 agosto 2026: mediana
