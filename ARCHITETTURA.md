@@ -212,12 +212,58 @@ silenzio. `_stampa_errore()` centralizza questa regola per gli errori;
 `link` usa `markup=False` perché la citazione Markdown *è* fatta di
 parentesi quadre.
 
-*(Il server MCP, `mcp_server.py`, arriva al branch `mcp`.)*
+`mcp_server.py` è la seconda porta, MCP invece che terminale, con lo stesso
+non-decidere: chiama `lookup.risolvi_riferimento` (condivisa con `cli.py`,
+non una copia — CLAUDE.md regola 6), `client.py`, `fonti.py`, `citazione.py`.
+Trasporto **stdio soltanto**. Un solo `ClienteNormattiva` per processo
+(`ApplicazioneMcp`, costruito nel `lifespan`), non uno per chiamata come in
+`cli.py`: il circuit breaker di `client.py` mantiene stato fra le richieste,
+e quello stato conta solo se il client sopravvive fra una chiamata e l'altra.
+Un `asyncio.Lock` serializza le richieste allo stesso client.
+
+**Quattro strumenti, non cinque**: `normattiva_leggi_articolo`,
+`normattiva_link`, `normattiva_trova_fonte` (l'unico locale, nessuna rete),
+`normattiva_leggi_urn`. `normattiva_cerca` dipende da `ricerca.py`, non
+ancora scritto, e arriva al branch `ricerca` successivo — il test "il
+server espone N strumenti" (`tests/test_mcp_server.py`) dichiara 4, da
+alzare a 5 in quel branch.
+
+Errori sanificati con lo stesso principio del gemello `mcp-bdm`: un errore
+di dominio (`NormattivaErrore`, `RiferimentoSconosciuto`,
+`FonteNonDisponibileErrore`, `UrnNonValido`) porta già un messaggio scritto
+per un modello o un avvocato e viaggia tale e quale; qualunque altra
+eccezione esce come `ErroreInternoMcp` con `type(exc).__name__` più un testo
+nostro, mai `str(exc)` — potrebbe contenere un frammento della risposta di
+Normattiva.
+
+**Ogni avviso non bloccante finisce in un campo `avvisi`/`avviso` come
+frase leggibile**, mai solo in un campo fratello strutturato ignorabile
+(CLAUDE.md regola 2): la ricaduta su vigenza storica, l'articolo abrogato,
+il preambolo al posto dell'articolo passano tutti da lì.
 
 ## Il budget del modello debole {#budget}
 
-*(da riempire al branch `mcp`: il tetto di caratteri, i quattro livelli di
-costo, come si misura con il banco di prova.)*
+Il tetto (`tests/test_tetto_descrizioni.py`, `TETTO_CARATTERI = 5.500`)
+somma istruzioni del server + descrizioni dei quattro strumenti +
+descrizioni dei parametri — lo stesso canale conta tutti e tre, perché una
+frase spostata dall'uno all'altro viaggia comunque nello stesso `tools/list`
+(difetto misurato nel gemello `italgiure-web-mcp`: contare solo le
+descrizioni degli strumenti lascia un canale gratuito dove nascondere
+prosa). Misura del 29 agosto 2026, branch `mcp`: 1.032 (istruzioni) + 2.673
+(descrizioni) + 0 (parametri) = **3.705** caratteri, con margine dichiarato
+per il quinto strumento del branch `ricerca`.
+
+Il criterio per ogni riga in `descrizioni.py`: dire solo ciò che cambia una
+decisione del modello — quale strumento chiamare, come riempirne i
+parametri — mai raccontare il "come funziona" del progetto, che sta in
+questo documento e in `docs/MISURE.md`. **Alzare il tetto per far entrare
+una frase nuova è vietato**: si taglia, o si sposta la spiegazione lunga in
+`docs/`, che il modello legge solo quando gli serve, non a ogni connessione.
+
+A differenza dei due gemelli (`mcp-bdm`, `italgiure-web-mcp`), qui non c'è
+un confronto IT/EN in corso: le descrizioni sono scritte in una sola lingua
+(italiano), coerente con tutta la documentazione del progetto e con
+l'avvocato proprietario.
 
 ## Che cosa non facciamo {#limiti}
 

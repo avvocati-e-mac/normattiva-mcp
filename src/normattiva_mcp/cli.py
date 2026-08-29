@@ -24,8 +24,11 @@ from normattiva_mcp.config import Config
 from normattiva_mcp.errori import NormattivaErrore
 from normattiva_mcp.esiti import Abrogato, Articolo, Preambolo
 from normattiva_mcp.fonti import Fonte, carica_tabella
-from normattiva_mcp.lookup import FonteNonDisponibileErrore, RiferimentoSconosciuto, risolvi_alias
-from normattiva_mcp.urn import Articolo as ArticoloUrn
+from normattiva_mcp.lookup import (
+    FonteNonDisponibileErrore,
+    RiferimentoSconosciuto,
+)
+from normattiva_mcp.lookup import risolvi_riferimento as _risolvi_riferimento_condiviso
 from normattiva_mcp.urn import UrnNonValido
 from normattiva_mcp.urn import analizza as analizza_urn
 
@@ -158,29 +161,11 @@ def _stampa_esito(esito: Articolo | Abrogato | Preambolo, *, come_json: bool) ->
 
 
 def _risolvi_riferimento(fonte: str, numero_articolo: str, vigenza: str | None):
-    """Risolve fonte+articolo passando prima dalla tabella (lookup.py);
-    solleva gli errori del dominio, che i comandi convertono in messaggi.
+    """Risolve fonte+articolo passando dalla tabella (`lookup.risolvi_riferimento`,
+    condivisa con `mcp_server.py` — CLAUDE.md regola 6); solleva gli errori del
+    dominio, che i comandi convertono in messaggi.
     """
-    from datetime import date as _date
-
-    estensione = None
-    cifre = ""
-    for carattere in numero_articolo:
-        if carattere.isdigit():
-            cifre += carattere
-        else:
-            break
-    if not cifre:
-        raise UrnNonValido(f"numero dell'articolo non valido: {numero_articolo!r}")
-    suffisso = numero_articolo[len(cifre) :]
-    if suffisso:
-        from normattiva_mcp.estensioni import analizza_estensione
-
-        estensione = analizza_estensione(suffisso)
-
-    articolo = ArticoloUrn(numero=int(cifre), estensione=estensione)
-    vigenza_data = _date.fromisoformat(vigenza) if vigenza else None
-    return risolvi_alias(fonte, articolo=articolo, vigenza_alla_data=vigenza_data)
+    return _risolvi_riferimento_condiviso(fonte, numero_articolo, vigenza)
 
 
 @app.command()

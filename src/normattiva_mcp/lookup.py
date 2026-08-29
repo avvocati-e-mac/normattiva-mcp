@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
+from datetime import date as _date
 
+from normattiva_mcp.estensioni import analizza_estensione
 from normattiva_mcp.fonti import Fonte, FonteNonDisponibile, TabellaFonti, carica_tabella
-from normattiva_mcp.urn import Articolo, TipoAtto, Urn
+from normattiva_mcp.urn import Articolo, TipoAtto, Urn, UrnNonValido
 
 _MESI_ITALIANI = {
     "gennaio",
@@ -269,3 +271,32 @@ def risolvi_alias(
             return _risultato_per_fonte(corrispondenze[0], articolo, vigenza_alla_data)
 
     raise RiferimentoSconosciuto(f'Nessuna fonte normativa nota per "{grezzo}"')
+
+
+def risolvi_riferimento(
+    fonte: str, numero_articolo: str, vigenza: str | None = None
+) -> RisultatoLookup:
+    """Risolve "fonte" + "numero articolo" (grafia libera, es. "21novies") + una
+    vigenza opzionale (YYYY-MM-DD) a un URN. UNICA sorgente di questo parsing:
+    `cli.py` e `mcp_server.py` chiamano questa funzione, mai una copia propria
+    (CLAUDE.md regola 6, "un valore, un simbolo" — vale anche per la logica di
+    lettura, non solo per le costanti).
+
+    Solleva `UrnNonValido` se il numero non inizia con cifre o l'estensione non
+    è riconosciuta, e propaga `RiferimentoSconosciuto`/`FonteNonDisponibileErrore`
+    da `risolvi_alias`.
+    """
+    cifre = ""
+    for carattere in numero_articolo:
+        if carattere.isdigit():
+            cifre += carattere
+        else:
+            break
+    if not cifre:
+        raise UrnNonValido(f"numero dell'articolo non valido: {numero_articolo!r}")
+    suffisso = numero_articolo[len(cifre) :]
+    estensione = analizza_estensione(suffisso) if suffisso else None
+
+    articolo = Articolo(numero=int(cifre), estensione=estensione)
+    vigenza_alla_data = _date.fromisoformat(vigenza) if vigenza else None
+    return risolvi_alias(fonte, articolo=articolo, vigenza_alla_data=vigenza_alla_data)
