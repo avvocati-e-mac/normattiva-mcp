@@ -58,3 +58,40 @@ chiudono un errore che la ricerca non risolverebbe da sola (gli 8 codici
 storici con allegato più 8 con un avviso di abrogazione/preambolo da
 conoscere in anticipo). La tabella resta il caso speciale, non l'elenco
 generale; cresce con l'uso tramite `norm fonti aggiungi`, mai a tavolino.
+
+## Un fallback Playwright/browser sul permalink del portale durante un'avaria API
+
+Considerato dopo l'avaria del 29/08/2026 (`docs/MISURE.md` §7, §7.1, §7.2).
+Scartato per ora: quel giorno stesso ha prodotto la prova più forte contro
+l'idea. La prima avaria (§7, ~10 minuti) ha colpito solo
+`dettaglio-atto-urn`, lasciando il portale raggiungibile — l'unico scenario
+in cui un fallback browser avrebbe avuto un bersaglio. La seconda (§7.1,
+§7.2, ~25+ minuti, la maggioranza del tempo osservato) ha portato giù
+l'intero dominio `normattiva.it` a livello TCP, portale incluso — confermato
+con `curl` puro e con un browser Chrome reale, che si è comportato in modo
+identico a `httpx`. API e portale condividono lo stesso dominio e
+verosimilmente la stessa infrastruttura di origine: non sono superfici di
+guasto indipendenti, quindi un fallback che assume "l'uno può cadere senza
+l'altro" scommette contro la correlazione strutturale osservata, non solo
+contro la sfortuna di un giorno.
+
+Anche nello scenario favorevole, il costo di farlo con sicurezza è alto
+quanto il lavoro già fatto per l'API: il portale è un HTML diverso
+(l'atto intero impaginato, non `articoloHtml`), servirebbe il suo proprio
+guardiano dell'heading (CLAUDE.md regola 1, regola 5 — §4.8 mostra che il
+portale risponde 200 anche a un URN con l'anno sbagliato, restituendo un
+atto diverso senza segnalarlo) e le sue fixture reali, in un secondo
+`parser.py` per un percorso atteso attivarsi qualche minuto l'anno. Resta
+anche 2.000× più pesante per lo stesso contenuto (`docs/MISURE.md` §2,
+CLAUDE.md regola 4): un'eccezione così rara non ripaga il costo di
+manutenzione di un secondo estrattore.
+
+Si riconsidera solo se si accumulano più osservazioni indipendenti di
+un'avaria selettiva (solo API, portale su) — non a tavolino da un singolo
+episodio — e solo con la sua propria misura in `docs/MISURE.md`, i suoi
+guardiani, e un marchio di trust distinto da `TRUST_ESTERNO` (es.
+`external_source_scraped_unverified`) che dichiari il testo come non
+passato dai controlli di `parser.py`. Nel frattempo, il guadagno diagnostico
+reale e a basso costo è estendere `norm doctor` a distinguere "solo
+l'endpoint dati è giù" da "tutto il dominio è giù", non a servire testo
+scaricato dal portale.
