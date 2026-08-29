@@ -1,8 +1,10 @@
 """Test del server MCP — nessuna rete reale: `ClienteNormattiva` riceve un
-`httpx.MockTransport`, come in `test_cli.py`. `@server.tool` restituisce la
-funzione originale invariata (non un wrapper), quindi le chiamate ai tool
-sono chiamate dirette con un `ctx` finto che porta `ApplicazioneMcp` nel
-contesto (stesso pattern del gemello `mcp-bdm`).
+`httpx.MockTransport`, come in `test_cli.py`. Le chiamate ai tool sono
+chiamate dirette a `mcp_server.normattiva_*`, che è già il risultato del
+decoratore `@_traduci_errori` (vedi il docstring del modulo): ogni
+eccezione di dominio arriva quindi come `ToolError` con lo stesso
+messaggio, mai come l'eccezione originale — è il comportamento vero
+osservato da Claude Desktop il 29/08/2026, non un dettaglio dei test.
 """
 
 from __future__ import annotations
@@ -13,11 +15,10 @@ from typing import Any
 
 import httpx
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 from normattiva_mcp import mcp_server
 from normattiva_mcp.client import ClienteNormattiva
-from normattiva_mcp.lookup import FonteNonDisponibileErrore, RiferimentoSconosciuto
-from normattiva_mcp.urn import UrnNonValido
 
 _NOMI_ATTESI = frozenset(
     {
@@ -101,12 +102,13 @@ async def test_leggi_articolo_codice_civile_2043() -> None:
 
 
 @pytest.mark.asyncio
-async def test_leggi_articolo_fonte_sconosciuta_solleva_errore_di_dominio() -> None:
+async def test_leggi_articolo_fonte_sconosciuta_arriva_come_tool_error() -> None:
     app = _app_finta(lambda _r: httpx.Response(500))
-    with pytest.raises(RiferimentoSconosciuto):
+    with pytest.raises(ToolError) as exc_info:
         await mcp_server.normattiva_leggi_articolo(
             _ctx_finto(app), fonte="una fonte inventata", articolo="1"
         )
+    assert "Nessuna fonte normativa nota" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -167,19 +169,27 @@ async def test_leggi_urn_valido() -> None:
 
 
 @pytest.mark.asyncio
-async def test_leggi_urn_malformato_solleva_urn_non_valido() -> None:
+async def test_leggi_urn_malformato_arriva_come_tool_error() -> None:
     app = _app_finta(lambda _r: httpx.Response(500))
-    with pytest.raises(UrnNonValido):
+    with pytest.raises(ToolError) as exc_info:
         await mcp_server.normattiva_leggi_urn(_ctx_finto(app), urn="non un urn")
+    assert "urn" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
-async def test_un_errore_imprevisto_esce_sanificato() -> None:
+async def test_un_errore_imprevisto_esce_come_tool_error_sanificato() -> None:
+    """Il caso reale osservato il 29/08/2026: senza `_traduci_errori`, un
+    `CircuitoAperto` (già un `NormattivaErrore` con un messaggio scritto per
+    il modello) veniva comunque nascosto dall'SDK perché non era una sua
+    `ToolError` — il modello leggeva solo "Error executing tool ...", non
+    il messaggio. Qui si verifica sia il caso di dominio (messaggio
+    conservato) sia il caso imprevisto (messaggio sanificato)."""
+
     def gestore(_request: httpx.Request) -> httpx.Response:
         raise RuntimeError("frammento imprevisto di una risposta")
 
     app = _app_finta(gestore)
-    with pytest.raises(mcp_server.ErroreInternoMcp) as exc_info:
+    with pytest.raises(ToolError) as exc_info:
         await mcp_server.normattiva_leggi_articolo(
             _ctx_finto(app), fonte="codice civile", articolo="2043"
         )
@@ -188,7 +198,7 @@ async def test_un_errore_imprevisto_esce_sanificato() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fonte_dichiaratamente_non_disponibile_solleva_errore_dedicato() -> None:
+async def test_fonte_dichiaratamente_non_disponibile_arriva_come_tool_error() -> None:
     app = _app_finta(lambda _r: httpx.Response(500))
     from normattiva_mcp.fonti import carica_tabella
 
@@ -196,5 +206,25 @@ async def test_fonte_dichiaratamente_non_disponibile_solleva_errore_dedicato() -
     if not non_disponibili:
         pytest.skip("nessuna fonte non disponibile in tabella")
     alias = non_disponibili[0].alias[0]
-    with pytest.raises(FonteNonDisponibileErrore):
+    with pytest.raises(ToolError) as exc_info:
         await mcp_server.normattiva_leggi_articolo(_ctx_finto(app), fonte=alias, articolo="1")
+    assert "non è disponibile su Normattiva" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_lo_stesso_errore_di_dominio_solleva_circuito_aperto_come_tool_error() -> None:
+    """Riproduce esattamente il bug osservato da Claude Desktop il
+    29/08/2026 durante l'avaria vera: tre guasti consecutivi aprono il
+    circuito, e il messaggio "Normattiva è stata sospesa..." deve
+    raggiungere il chiamante MCP dentro un `ToolError`, non sparire in
+    un crash generico."""
+
+    def gestore(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    app = _app_finta(gestore)
+    with pytest.raises(ToolError) as exc_info:
+        await mcp_server.normattiva_leggi_articolo(
+            _ctx_finto(app), fonte="codice civile", articolo="2043"
+        )
+    assert "Normattiva è stata sospesa" in str(exc_info.value)

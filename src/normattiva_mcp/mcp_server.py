@@ -20,23 +20,35 @@ client nuovo. `_lucchetto` serializza le richieste allo stesso client fra
 chiamate concorrenti — questo server non ha bisogno di parallelismo verso
 un'unica API pubblica.
 
-ERRORI SANIFICATI: un errore di dominio (`NormattivaErrore`,
-`RiferimentoSconosciuto`, `FonteNonDisponibileErrore`, `UrnNonValido`)
-porta già un messaggio scritto per essere letto da un modello o da un
-avvocato (CLAUDE.md, regola 1) e viaggia tale e quale. Qualunque altra
-eccezione non esce mai con `str(exc)`: solo `type(exc).__name__` più un
-testo nostro, perché un messaggio di libreria potrebbe citare un
-frammento della risposta di Normattiva.
+ERRORI SANIFICATI, E PERCHÉ DEVONO ESSERE `ToolError`. Un errore di
+dominio (`NormattivaErrore`, `RiferimentoSconosciuto`,
+`FonteNonDisponibileErrore`, `UrnNonValido`) porta già un messaggio scritto
+per essere letto da un modello o da un avvocato (CLAUDE.md, regola 1) —
+ma l'SDK (`mcp.server.mcpserver.tools.base.Tool.run`) tratta come un
+crash silenzioso QUALUNQUE eccezione che non sia una sua `ToolError`:
+il modello legge solo "Error executing tool <nome>", perdendo il
+messaggio. Ogni strumento passa quindi da `_traduci_errori`, che converte
+un errore di dominio in `ToolError(str(exc))` (messaggio conservato) e
+qualunque altra eccezione in un `ToolError` col solo `type(exc).__name__`
+più un testo nostro, mai `str(exc)` — potrebbe citare un frammento della
+risposta di Normattiva. **Scoperto provando il server a mano da Claude
+Desktop il 29/08/2026** (durante l'avaria in corso: il modello vedeva un
+errore muto invece del messaggio "Normattiva è stata sospesa..."), mai
+dai test che chiamavano le funzioni direttamente saltando l'SDK — da qui
+`tests/test_mcp_server.py` verifica anche il tipo `ToolError`, non solo
+il messaggio.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
@@ -64,10 +76,31 @@ avvocato (CLAUDE.md regola 1): viaggiano verso il chiamante MCP tali e
 quali, mai sanificate."""
 
 
-class ErroreInternoMcp(NormattivaErrore):
-    """Un'eccezione fuori dai casi noti del dominio, sanificata prima di
-    uscire dal server: non porta mai `str(exc)`, che potrebbe contenere
-    un frammento della risposta di Normattiva."""
+def _traduci_errori(fn):
+    """Converte ogni eccezione sollevata da uno strumento in `ToolError`
+    (vedi "ERRORI SANIFICATI" nel docstring del modulo). Applicato a
+    ognuno dei quattro strumenti, non solo dentro `_rete`: `_risolvi_riferimento`
+    e `analizza_urn` sollevano i loro errori PRIMA di entrare in `_rete`,
+    quindi la traduzione deve avvolgere l'intero corpo dello strumento."""
+
+    @functools.wraps(fn)
+    async def involucro(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except ToolError:
+            raise
+        except _ERRORI_DI_DOMINIO_NOTI as exc:
+            raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            raise ToolError(
+                f"{type(exc).__name__}: si è fermato un errore imprevisto, non "
+                "riconosciuto come uno dei casi noti di questo programma. Il "
+                "messaggio originale non viene mostrato perché potrebbe contenere "
+                "un frammento della risposta di Normattiva. Se si ripete, va "
+                "segnalato al titolare del programma."
+            ) from exc
+
+    return involucro
 
 
 def _d(nome: str) -> tuple[str, str]:
@@ -99,21 +132,11 @@ def _applicazione(ctx: Context) -> ApplicazioneMcp:
 
 
 async def _rete[T](app: ApplicazioneMcp, azione: Callable[[], T]) -> T:
-    """Una richiesta alla volta verso l'unico client di processo, con gli
-    errori sanificati (vedi il docstring del modulo)."""
+    """Una richiesta alla volta verso l'unico client di processo. La
+    traduzione degli errori vive in `_traduci_errori`, non qui: avvolge
+    l'intero strumento, non solo la parte che tocca la rete."""
     async with app.lucchetto:
-        try:
-            return azione()
-        except _ERRORI_DI_DOMINIO_NOTI:
-            raise
-        except Exception as exc:
-            raise ErroreInternoMcp(
-                f"{type(exc).__name__}: si è fermato un errore imprevisto, non "
-                "riconosciuto come uno dei casi noti di questo programma. Il "
-                "messaggio originale non viene mostrato perché potrebbe contenere "
-                "un frammento della risposta di Normattiva. Se si ripete, va "
-                "segnalato al titolare del programma."
-            ) from exc
+        return azione()
 
 
 RETE = ToolAnnotations(
@@ -227,6 +250,7 @@ _TITOLO, _DESCR = _d("normattiva_leggi_articolo")
     annotations=RETE,
     structured_output=True,
 )
+@_traduci_errori
 async def normattiva_leggi_articolo(
     ctx: Context,
     fonte: str,
@@ -264,6 +288,7 @@ _TITOLO, _DESCR = _d("normattiva_link")
     annotations=RETE,
     structured_output=True,
 )
+@_traduci_errori
 async def normattiva_link(
     ctx: Context,
     fonte: str,
@@ -331,6 +356,7 @@ _TITOLO, _DESCR = _d("normattiva_trova_fonte")
     annotations=LOCALE,
     structured_output=True,
 )
+@_traduci_errori
 async def normattiva_trova_fonte(ctx: Context, testo: str) -> FonteOutput:
     _applicazione(ctx)  # valida il contesto, anche se questo strumento non tocca la rete
     tabella = carica_tabella()
@@ -374,6 +400,7 @@ _TITOLO, _DESCR = _d("normattiva_leggi_urn")
     annotations=RETE,
     structured_output=True,
 )
+@_traduci_errori
 async def normattiva_leggi_urn(ctx: Context, urn: str) -> EsitoOutput:
     app = _applicazione(ctx)
     u = analizza_urn(urn)
