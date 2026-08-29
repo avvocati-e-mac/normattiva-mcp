@@ -269,6 +269,29 @@ macchina/rete usata per lo sviluppo**: servirebbe un secondo host su una
 rete diversa per distinguere le due ipotesi. Ancora in corso ~25 minuti
 dopo la prima osservazione (verificato per l'ultima volta alle 13:15).
 
+### 7.2 Terza osservazione, 29/08/2026 pomeriggio: isolata la causa — non è la rete locale
+
+Ripresa la sessione nel pomeriggio, `normattiva.it` era ancora
+irraggiungibile. Stavolta è stato possibile isolare la causa con due
+controlli mirati (browser Chrome reale non disponibile in questo giro:
+l'estensione claude-in-chrome non risultava connessa):
+
+- **`dig +short www.normattiva.it`**: risolve regolarmente a
+  `147.78.212.12`. Non è un fallimento DNS.
+- **`curl -v` verso quell'IP sulla 443**: `ipv4 connect timeout after
+  3959ms`, poi timeout totale a 8 s — il pacchetto SYN non riceve
+  risposta, non è un rifiuto TLS/applicativo.
+- **Controllo nello stesso istante**: `dig www.google.com` risolve
+  normalmente e `curl https://www.google.com` risponde `200` in meno di
+  un secondo.
+
+**Conclusione**: la macchina/rete locale funziona (DNS e connettività
+generale sono a posto); il problema è specifico dell'host
+`147.78.212.12`/`normattiva.it`, che non accetta connessioni sulla 443.
+Questo isola — ma non prova con un secondo host esterno — che la causa
+più probabile è un'avaria o un blocco lato Normattiva o a monte di esso,
+non un difetto di rete locale a questa macchina.
+
 ## 8. Prestazioni generali
 
 ~800 richieste reali documentate fra agosto e il 29 agosto 2026: mediana
