@@ -110,8 +110,14 @@ ISTRUZIONI_SERVER = (
     "Per un codice storico (civile, penale, procedura, navigazione) usa "
     "normattiva_trova_fonte prima di indovinare numero o allegato: la ricerca "
     "full-text di questo sito non li trova.\n"
-    "Un errore che dice «il servizio è in avaria» è un fatto temporaneo su Normattiva, "
-    "mai un giudizio sulla norma cercata: non concluderne che la norma non esiste."
+    "Un errore che dice «il servizio è in avaria» o «sospesa dopo guasti ripetuti» è un "
+    "fatto temporaneo, mai un giudizio sulla norma cercata: non concluderne che non "
+    "esiste, e non ritentare da solo — il client ha già ritentato lui e aperto apposta "
+    "il circuito per non insistere. Dillo all'utente con le parole dell'errore; per "
+    "sapere se è un'avaria vera, `norm doctor` da terminale sonda proprio l'endpoint "
+    "che si è già guastato da solo (29/08/2026), e riprovare da un'altra rete distingue "
+    "un'avaria del sito da un problema locale — un'avaria vera resta irraggiungibile "
+    "anche da lì."
 )
 
 __all__ = ["DESCRIZIONI", "ISTRUZIONI_SERVER", "DescrizioneStrumento"]

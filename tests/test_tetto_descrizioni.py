@@ -16,11 +16,12 @@ from __future__ import annotations
 from normattiva_mcp import mcp_server
 
 TETTO_CARATTERI = 5_500
-"""Misurato il 29 agosto 2026, branch `mcp`: istruzioni (1.032) + quattro
-descrizioni di strumento (2.673) + descrizioni dei parametri (0) = 3.705
-caratteri. Il tetto lascia margine per il quinto strumento
-(`normattiva_cerca`, branch `ricerca` successivo) senza doverlo alzare
-al primo strumento aggiunto."""
+"""Misurato il 29 agosto 2026, branch `mcp`: istruzioni (1.451, dopo
+l'aggiunta della guida diagnostica su come riconoscere un'avaria vera —
+`norm doctor`, un'altra rete) + quattro descrizioni di strumento (2.673)
++ descrizioni dei parametri (0) = 4.124 caratteri. Il tetto lascia
+margine per il quinto strumento (`normattiva_cerca`, branch `ricerca`
+successivo) senza doverlo alzare al primo strumento aggiunto."""
 
 
 def _istruzioni() -> str:

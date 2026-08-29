@@ -249,9 +249,10 @@ descrizioni dei parametri — lo stesso canale conta tutti e tre, perché una
 frase spostata dall'uno all'altro viaggia comunque nello stesso `tools/list`
 (difetto misurato nel gemello `italgiure-web-mcp`: contare solo le
 descrizioni degli strumenti lascia un canale gratuito dove nascondere
-prosa). Misura del 29 agosto 2026, branch `mcp`: 1.032 (istruzioni) + 2.673
-(descrizioni) + 0 (parametri) = **3.705** caratteri, con margine dichiarato
-per il quinto strumento del branch `ricerca`.
+prosa). Misura del 29 agosto 2026, branch `mcp`: 1.451 (istruzioni, dopo
+l'aggiunta della guida diagnostica sull'avaria — `norm doctor`, un'altra
+rete) + 2.673 (descrizioni) + 0 (parametri) = **4.124** caratteri, con
+margine dichiarato per il quinto strumento del branch `ricerca`.
 
 Il criterio per ogni riga in `descrizioni.py`: dire solo ciò che cambia una
 decisione del modello — quale strumento chiamare, come riempirne i
