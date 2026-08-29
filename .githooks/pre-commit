@@ -1,0 +1,45 @@
+#!/bin/sh
+# Cancello prima di ogni commit: formattazione, lint, e la suite offline.
+#
+# Due regole ereditate dai progetti gemelli (mcp-bdm, italgiure-web-mcp),
+# entrambe nate da un difetto osservato lì:
+# 1. Questo hook non esegue MAI `git add`: un'esecuzione precedente che lo
+#    faceva ha fatto scomparire righe non descritte durante un commit parziale.
+# 2. pytest gira solo se il commit tocca src/ o tests/ o banco/: un commit di
+#    sola documentazione non deve pagare il tempo della suite.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "pre-commit: 'uv' non è installato, salto i controlli automatici." >&2
+  echo "pre-commit: installa uv (https://docs.astral.sh/uv/) per riattivarli." >&2
+  exit 0
+fi
+
+export UV_CACHE_DIR="${TMPDIR:-/tmp}/normattiva-mcp-uv-cache"
+
+in_staging=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -n "$in_staging" ]; then
+  echo "pre-commit: ruff format --check"
+  uv run ruff format --check .
+  echo "pre-commit: ruff check"
+  uv run ruff check .
+fi
+
+if echo "$in_staging" | grep -qE '^(src|tests|banco)/'; then
+  echo "pre-commit: pytest (suite offline)"
+  # Uscita 5 = "nessun test raccolto": legittimo nelle prime fasi del
+  # progetto (impianto, fixture ancora vuote). Ogni altra uscita non nulla
+  # blocca il commit.
+  set +e
+  uv run pytest
+  esito=$?
+  set -e
+  if [ "$esito" -ne 0 ] && [ "$esito" -ne 5 ]; then
+    exit "$esito"
+  fi
+else
+  echo "pre-commit: nessun file sotto src/, tests/ o banco/ in questo commit, pytest non eseguito"
+fi
