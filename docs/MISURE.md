@@ -292,6 +292,27 @@ Questo isola — ma non prova con un secondo host esterno — che la causa
 più probabile è un'avaria o un blocco lato Normattiva o a monte di esso,
 non un difetto di rete locale a questa macchina.
 
+### 7.3 Quarta osservazione, 29/08/2026: irraggiungibile anche in HTTP puro (porta 80)
+
+Nuova sessione, stesso giorno, `normattiva.it` ancora giù. Per escludere
+che il problema fosse specifico di TLS/443, ripetuto il test anche sulla
+porta 80 (HTTP semplice, senza handshake TLS):
+
+- **TCP verso la 443** (sia `api.normattiva.it` che `www.normattiva.it`):
+  connessione fallita (timeout), come in §7.2.
+- **TCP verso la 80** (stessi due host): fallita allo stesso modo.
+- **`curl` HTTP puro** (`http://`, non `https://`) verso entrambi: nessuna
+  risposta, timeout a 10 s.
+- **Controllo nello stesso istante**: DNS di entrambi gli host risolve
+  regolarmente, e `google.com` risponde `200` in meno di un secondo — la
+  rete locale non è la causa.
+
+**Conclusione più precisa di §7.2**: non è un problema del solo TLS/443 —
+l'host non risponde su nessuna porta web standard, né 80 né 443. Questo
+rafforza l'ipotesi di un'interruzione a livello di rete/infrastruttura
+lato Normattiva (o a monte di essa), non di un singolo servizio o
+protocollo applicativo.
+
 ## 8. Prestazioni generali
 
 ~800 richieste reali documentate fra agosto e il 29 agosto 2026: mediana
