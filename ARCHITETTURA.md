@@ -36,10 +36,11 @@ avvocato ──chiede──▶  LLM (anche debole, es. DeepSeek 4 flash)
 | `urn.py`, `estensioni.py` | grammatica URN: costruzione e rifiuti, senza rete |
 | `fonti.py` + `data/fonti.json` | le fonti verificate, come dati |
 | `lookup.py` | alias → URN, senza rete — l'unica strada per i codici storici |
+| `dto.py` | risolve le due forme di risposta (`data.atto` / `data.lista`) in un punto solo |
+| `parser.py` | HTML → esito tipizzato, con i tre guardiani → `#guardiani` |
 
-*(da completare ai branch successivi: `client.py`, `dto.py`, `parser.py`,
-`guardiani.py`, `ricerca.py`, `esiti.py`, `citazione.py`, `descrizioni.py`,
-`mcp_server.py`, `cli.py`.)*
+*(da completare ai branch successivi: `client.py`, `ricerca.py`, `esiti.py`,
+`citazione.py`, `descrizioni.py`, `mcp_server.py`, `cli.py`.)*
 
 ## La grammatica dell'URN {#urn}
 
@@ -70,7 +71,40 @@ chiude e il test che la prova. Le nove trappole sono elencate in
 
 ## I guardiani {#guardiani}
 
-*(da riempire al branch `parser`: preambolo, abrogato, heading discordante.)*
+`parser.py` trasforma `articoloHtml` in uno di tre esiti tipizzati
+(`CorpoArticolo`, `Abrogato`, `Preambolo`) o solleva un errore
+(`HtmlVuoto`, `HeadingDiscordante`). Il controllo portante è la
+**coincidenza dell'heading**: il numero d'articolo estratto dalla risposta
+deve coincidere con quello richiesto, altrimenti `HeadingDiscordante` — è
+il solo controllo che intercetta un URN formalmente valido ma puntato al
+posto sbagliato (il portale risponde 200 a tutto, l'API risponde 200 anche
+per un preambolo).
+
+Tre trappole chiuse, in ordine di applicazione:
+
+1. **Abrogato PRIMA di ogni altra cosa** — un testo sotto 200 caratteri con
+   "ABROGAT" è informazione, non un vuoto (docs/MISURE.md §4.5).
+2. **Il taglio del preambolo** (`_dal_heading`) — per `~art1` la risposta
+   contiene spesso preambolo E POI l'articolo vero: si taglia tutto ciò
+   che precede l'heading, non solo se sembra vuoto.
+3. **Il guardiano del preambolo** (`_sembra_preambolo`) — il taglio da solo
+   non basta: alcuni atti rispondono "Art. 1" seguito comunque dal
+   preambolo, sotto un heading corretto. Si cercano almeno 2 formule di
+   promulgazione ("VISTI GLI ARTICOLI", "EMANA IL SEGUENTE DECRETO", ...)
+   nei primi 400 caratteri — 2 e non 1, perché l'art. 87 Cost. cita
+   legittimamente "il Presidente della Repubblica" in un articolo vero.
+
+Un quarto difetto, non una trappola dell'API ma un bug del parser stesso
+scoperto durante il porting: l'elenco delle estensioni ordinali
+(`bis`, `ter`, ...) è **derivato da `estensioni.py`**, non ricopiato — una
+rubrica non parentetica ("Art. 542. Concorso di coniuge e figli") veniva
+altrimenti letta come estensione inventata, e l'articolo giusto respinto
+per heading discordante.
+
+I test di `tests/test_parser.py` girano contro le **11 catture HTTP reali**
+in `tests/fixtures/risposte/reale-*.json` (7 agosto 2026, mai ricostruite a
+mano): un test verde qui prova il parser contro Normattiva, non contro se
+stesso.
 
 ## La tabella delle fonti {#fonti}
 
