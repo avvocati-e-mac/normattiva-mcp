@@ -31,8 +31,15 @@ avvocato ──chiede──▶  LLM (anche debole, es. DeepSeek 4 flash)
 
 ## Gli strati {#strati}
 
-*(da riempire al branch `impianto` → `grammatica-urn`: elenco dei moduli con
-una riga di responsabilità ciascuno, mano a mano che nascono.)*
+| Modulo | Responsabilità |
+|---|---|
+| `urn.py`, `estensioni.py` | grammatica URN: costruzione e rifiuti, senza rete |
+| `fonti.py` + `data/fonti.json` | le fonti verificate, come dati |
+| `lookup.py` | alias → URN, senza rete — l'unica strada per i codici storici |
+
+*(da completare ai branch successivi: `client.py`, `dto.py`, `parser.py`,
+`guardiani.py`, `ricerca.py`, `esiti.py`, `citazione.py`, `descrizioni.py`,
+`mcp_server.py`, `cli.py`.)*
 
 ## La grammatica dell'URN {#urn}
 
