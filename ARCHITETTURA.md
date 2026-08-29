@@ -38,9 +38,48 @@ avvocato ──chiede──▶  LLM (anche debole, es. DeepSeek 4 flash)
 | `lookup.py` | alias → URN, senza rete — l'unica strada per i codici storici |
 | `dto.py` | risolve le due forme di risposta (`data.atto` / `data.lista`) in un punto solo |
 | `parser.py` | HTML → esito tipizzato, con i tre guardiani → `#guardiani` |
+| `esiti.py` | gli esiti pubblici (`Articolo`, `Abrogato`, `Preambolo`), la busta `trust` e il sanificatore |
+| `errori.py` | le eccezioni tipizzate del client, con messaggi scritti per un LLM o un avvocato |
+| `client.py` | HTTP: un solo endpoint, i tre 404, il 500 "servizio giù", il circuit breaker, la ricaduta su vigenza |
 
-*(da completare ai branch successivi: `client.py`, `ricerca.py`, `esiti.py`,
-`citazione.py`, `descrizioni.py`, `mcp_server.py`, `cli.py`.)*
+*(da completare ai branch successivi: `ricerca.py`, `citazione.py`,
+`descrizioni.py`, `mcp_server.py`, `cli.py`.)*
+
+## La ricaduta a vigenza passata {#vigenza}
+
+`ClienteNormattiva.leggi_articolo` fa al più DUE richieste HTTP. Se la
+prima risponde "abrogato", si ritenta con `!vig=` al giorno **precedente**
+la data di abrogazione — solo se **tutte** queste condizioni valgono:
+
+1. l'esito è `Abrogato` (non un 404: quello significa "coordinate
+   sbagliate" e va corretto, non retrodatato);
+2. il chiamante non aveva già chiesto una vigenza (`urn.vigenza is None`)
+   — impedisce anche una seconda ricaduta;
+3. il messaggio di abrogazione porta una data leggibile;
+4. la seconda richiesta restituisce davvero un `Articolo`.
+
+Se una condizione manca, l'esito originale (`Abrogato`) resta quello
+valido: la ricaduta può solo migliorare la risposta, mai sostituire un
+errore onesto con un altro. Il risultato porta sempre `vigenza_storica`
+con l'avviso `"ATTENZIONE — TESTO NON VIGENTE..."` **dentro** il testo
+della risposta — non solo in un campo fratello che un lettore disattento
+può ignorare (CLAUDE.md regola 2).
+
+## Il circuit breaker e il 500 "servizio giù" {#avaria}
+
+Tre guasti consecutivi (5xx o errore di trasporto) aprono il circuito per
+60 secondi; un 400/404 (il servizio ha risposto) lo richiude. Un 500 non è
+mai un giudizio sulla norma cercata: è sempre "il servizio è in avaria
+adesso" (`ServizioInAvaria`), coerente con l'avaria transitoria osservata
+il 29/08/2026 (docs/MISURE.md §7). Nessun ritentativo su 4xx: un 400 o un
+404 sono risposte corrette a una domanda malformata o a coordinate
+sbagliate, non un guasto.
+
+`ClienteNormattiva.dormi` è la funzione di pausa del backoff, iniettabile:
+nei test si passa una funzione che non dorme davvero, così un circuito che
+apre dopo tre guasti non fa aspettare la suite per secondi reali — la
+pausa resta comunque misurata (chiamata con il valore giusto), solo non
+eseguita per davvero (`tests/test_client.py::test_backoff_chiamato_con_le_pause_dichiarate`).
 
 ## La grammatica dell'URN {#urn}
 

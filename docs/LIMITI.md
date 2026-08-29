@@ -44,6 +44,18 @@ La catena `ricerca-asincrona/nuova-ricerca` → `conferma-ricerca` →
 `check-status` → download richiede un token confermato via e-mail:
 inutilizzabile in un flusso interattivo con un LLM.
 
+## Da verificare: tre tipi di allegati per i codici (non ancora misurato)
+
+Un progetto di terzi esaminato il 29/08/2026 (ispezione informativa, nessun
+codice copiato) distingue tre concetti diversi per un codice storico:
+disposizioni di attuazione, disposizioni di coordinamento/transitorie, e
+regolamento di esecuzione — non tutti i codici li hanno tutti (es. il c.p.c.
+ha attuazione e transitorie, il c.p. solo coordinamento, il c.p.p. solo un
+regolamento). La tabella attuale (`data/fonti.json`) non distingue questi
+tre casi come voci separate. Non è chiaro se serva: nessuna misura diretta
+lo ha ancora richiesto. Da verificare se e quando un caso reale lo chiede,
+non da implementare a tavolino.
+
 ## L'endpoint può andare in avaria senza preavviso
 
 Il BFF (`bff-opendata`) non è un'API pubblica versionata con un contratto
