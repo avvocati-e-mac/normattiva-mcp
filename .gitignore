@@ -1,0 +1,23 @@
+# Ambiente Python / uv
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor e sistema
+.DS_Store
+.vscode/
+.idea/
+
+# Esito dei banchi di prova (non versionato: cambia a ogni corsa)
+banco/esiti.json
+
+# Segreti locali (chiavi OpenRouter per il banco di prova)
+.env
+*.key
