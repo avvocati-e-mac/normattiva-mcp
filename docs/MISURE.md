@@ -301,3 +301,38 @@ sequenziali. Nessun rate limit osservato sull'endpoint dati. Un WAF esiste
 nel perimetro di `dati.normattiva.it` (risponde 409 su alcuni path, es.
 `robots.txt` e i GET con query string) ma non ha mai colpito
 `api.normattiva.it`.
+
+## 9. Un run, non una misura: comportamento durante l'avaria vera (29/08/2026)
+
+**Non è un banco di prova** (quello resta il branch `banco`, non ancora
+iniziato, coi dieci compiti del piano) — è **un solo run** con due
+assistenti diversi collegati allo stesso server MCP durante l'avaria reale
+documentata sopra, osservato perché capitato mentre il server esisteva già
+e l'avaria era in corso. Un campione di uno per modello non prova nulla
+sulla frequenza di un comportamento; qui si registra solo cosa è successo,
+quella volta.
+
+**Claude Desktop (Sonnet 5)**, dopo che `normattiva_leggi_articolo` e
+`normattiva_link` sono falliti per l'avaria (con l'errore ancora muto,
+prima del fix di `_traduci_errori` — vedi commit `1b7de6c`), ha offerto di
+recitare l'art. 1218 c.c. **a memoria**, con la cautela "salvo mie
+imprecisioni": un testo plausibile ma non verificato, proprio il rischio
+che CLAUDE.md regola 1 vuole escludere, anche se accompagnato da un
+avvertimento onesto.
+
+**DeepSeek v4 flash** (via `opencode run -m
+openrouter/deepseek/deepseek-v4-flash --auto`, stessa richiesta, DOPO il
+fix di `_traduci_errori`, quindi con l'errore leggibile) ha risposto
+riportando l'errore quasi testuale ("Normattiva è stata sospesa dopo
+guasti ripetuti: riprova fra 60 s"), ha aggiunto "non un problema
+dell'articolo 1218" (escludendo l'inferenza "la norma non esiste"), ha
+suggerito `norm doctor` come da `ISTRUZIONI_SERVER` — e **non ha offerto
+nessuna ricostruzione a memoria**. Sullo stesso run, `normattiva_link` con
+`verifica=false` ha prodotto spontaneamente l'avviso sul rischio del
+permalink non verificato (regola 5), senza che nessuno lo chiedesse.
+
+**Cosa non si può concludere da questo**: che DeepSeek v4 flash sia "più
+disciplinato" di Sonnet 5 in generale — le due prove non sono nemmeno
+comparabili alla lettera, perché Sonnet 5 ha visto l'errore muto (bug poi
+corretto) e DeepSeek ha visto il messaggio vero. È un punto di partenza
+per il banco di prova vero, non una misura.
