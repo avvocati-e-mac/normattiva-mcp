@@ -67,9 +67,39 @@ chiude e il test che la prova. Le nove trappole sono elencate in
 
 ## La tabella delle fonti {#fonti}
 
-*(da riempire al branch `tabella-fonti`: formato di `data/fonti.json`, la
-regola della provenienza, come `norm verifica` distingue un'avaria del
-servizio da una riga davvero sbagliata.)*
+`data/fonti.json` contiene **47 fonti verificate** (i codici storici e le
+leggi principali del lavoro forense) e **4 fonti dichiarate non
+disponibili** su Normattiva (GDPR, CEDU, codice deontologico forense,
+D.M. 55/2014 parametri forensi). `fonti.py` le carica in dataclass
+(`Fonte`, `FonteNonDisponibile`) tramite `carica_tabella()`.
+
+Perché questa tabella non cresce a mano fino a "tutte le leggi": vedi
+`docs/IDEE-SCARTATE.md`. Delle 47 fonti attuali, solo le righe con un
+allegato (i codici storici, dove la ricerca full-text non può ricostruire
+l'URN) o con `art1_e_preambolo: true` chiudono un errore che la ricerca non
+risolverebbe da sola — le altre restano per comodità.
+
+Ogni riga porta:
+- **`provenienza`** — dove è stato verificato il dato. Una riga senza
+  prova non entra (`test_ogni_fonte_ha_provenienza_non_vuota`).
+- **`articolo_di_controllo`** — un articolo numerico che deve restituire
+  testo vero, mai il preambolo. Un test dedicato
+  (`test_nessun_articolo_di_controllo_e_l_articolo_1_quando_e_preambolo`)
+  impedisce la regressione trovata il 29/08/2026: due righe del dataset
+  originale avevano l'art. 1 come controllo su una fonte dove l'art. 1
+  restituisce il preambolo — un "controllo" che non controllava nulla.
+- **`stato`** — `vigente` o `abrogata`, con nota.
+
+`tests/fixtures/urn-attesi.txt` congela l'URN atteso di ogni fonte: include
+come test di regressione i due errori storici già scoperti nella skill
+esistente (Legge Fallimentare datata `1942-01-16` invece di `1942-03-16`;
+Codice della Navigazione senza l'allegato `:1`).
+
+*(Il comando `norm fonti aggiungi`, che fa crescere la tabella con l'uso
+verificando ogni riga contro l'API, arriva al branch `cli`/`client`: dipende
+dal client HTTP, che non esiste ancora a questo punto della sequenza.
+`norm verifica`, che distingue un'avaria del servizio da una riga davvero
+sbagliata, arriva allo stesso punto.)*
 
 ## Le due porte {#due-porte}
 
