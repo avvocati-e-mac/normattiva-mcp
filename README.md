@@ -104,6 +104,14 @@ server locale.
 
 ## Uso prudente della rete
 
+> **Avvertenza:** osservazioni empiriche indicano che, dopo un numero elevato di
+> richieste, Normattiva.it può smettere di rispondere in modo persistente da uno
+> specifico indirizzo IP pur restando raggiungibile da altre reti. Non vi è una
+> conferma ufficiale che si tratti di un ban, e sintomi analoghi possono dipendere
+> anche da filtri o problemi di instradamento. Considerare comunque concreto il
+> rischio: usare l'MCP con parsimonia, evitare raffiche e parallelismo e fermarsi
+> al primo errore o cooldown senza tentare di proseguire tramite altre reti.
+
 Il programma usa soltanto l'endpoint Open Data documentato `POST
 .../atto/dettaglio-atto-urn`, mai scraping HTML, browser automation, proxy
 o cambio di IP/VPN. Il permalink è generato come link, ma non viene scaricato.
