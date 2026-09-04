@@ -113,7 +113,7 @@ rotte — successo osservato durante il red team di agosto.
 | `{"message":"dataPubblicazioneGazzetta:... codiceRedazionale:... idArticolo:... artP:0", "code":null}` | ~168-171 | l'atto esiste, le coordinate (allegato/articolo) sono sbagliate | si può ritentare con un altro allegato |
 | `{"code":"404","type":"Status report","message":"Runtime Error","description":"No matching resource found..."}` | 128 | indirizzo dell'endpoint sbagliato | difetto nostro, non del dato |
 | `{"message":"urn assente o non valido...", "code":"1003"}`, HTTP **400** | 171 | URN ben formato ma atto inesistente | errore definitivo, diverso dal 404 breve |
-| `{"message":"Errore generico della chiamata, riprovare più tardi","code":"1000"}`, HTTP **500** | 80 | **il servizio è in avaria adesso** | mai un giudizio sulla riga, mai un ritentativo automatico — vedi §7 |
+| `{"message":"Errore generico della chiamata, riprovare più tardi","code":"1000"}`, HTTP **500** | 80 | anomalia temporanea o limitazione, causa non provata | mai un giudizio sulla riga, mai un ritentativo automatico — vedi §7 |
 
 I tre nomi del dump (`codiceRedazionale`, `idArticolo`, `artP`) **non sono
 chiavi JSON**: stanno dentro la stringa `message`, separati da spazi.
@@ -226,15 +226,17 @@ normalmente. Due controlli fatti per escludere le ipotesi peggiori:
   su, l'art. 2043 c.c. ha risposto byte-identico (1.287 byte) alla misura
   di stamattina e a quella di agosto.
 
-Era un'avaria transitoria e specifica di quell'endpoint. **Conseguenza
-pratica**: un controllo di salute generico ("il sito risponde?") direbbe
+L'osservazione era compatibile con un'avaria transitoria e specifica
+dell'endpoint, ma anche con una limitazione individuale o di percorso;
+non è una prova conclusiva. **Conseguenza pratica**: un controllo di salute
+generico ("il sito risponde?") direbbe
 "tutto bene" mentre l'unica funzione che conta è ferma — il controllo deve
 sondare `dettaglio-atto-urn` in particolare. E un 500 va sempre trattato
-come "il servizio è giù adesso", mai come "la norma non esiste", senza
+come anomalia indeterminata, mai come "la norma non esiste", senza
 ritentativi automatici (che rischierebbero di aggravare un'eventuale causa
 reale di rate-limit, anche se qui non ne abbiamo trovata).
 
-### 7.1 Seconda osservazione, stesso giorno: avaria più estesa, tutto il dominio
+### 7.1 Seconda osservazione, stesso giorno: indisponibilità più estesa
 
 Circa due ore dopo la prima avaria (29/08/2026, verso le 12:50), l'intero
 dominio `normattiva.it` — portale pubblico incluso, non solo
@@ -246,12 +248,11 @@ questo client), su tre endpoint diversi (portale, `tipologiche/estensioni`,
 (altri domini, es. google.com, rispondevano normalmente nello stesso
 istante).
 
-Il client (`ClienteNormattiva`, timeout 15 s) si è comportato come
-progettato: dopo 3 tentativi da 15 s ciascuno più il backoff, ha aperto il
-circuito e restituito un messaggio chiaro ("Normattiva è stata sospesa
-dopo guasti ripetuti: riprova fra 60 s") invece di restare appeso
-indefinitamente — verificato con `norm leggi` e `norm doctor` durante
-l'avaria reale, non solo con fixture.
+Il client dell'epoca (timeout 15 s) effettuò tre tentativi con backoff e
+un circuit breaker. È una descrizione storica, non la politica attuale:
+oggi ogni tentativo conta, non esistono retry automatici e il cooldown è
+condiviso. L'episodio è stato osservato con `norm leggi` e `norm doctor`,
+ma non prova la natura generale dell'incidente.
 
 **Non è chiaro se questa seconda avaria sia collegata alla prima o un
 evento distinto** (manutenzione più ampia? un problema di rete più a
@@ -264,12 +265,12 @@ la navigazione a `https://www.normattiva.it` non completa, il tab torna a
 `chrome://newtab/` — sintomo tipico di un fallimento di risoluzione
 DNS/connessione, non un errore applicativo del sito. Conferma che non è
 un difetto specifico di questo client HTTP. **Resta non isolato se sia
-un'avaria reale del servizio o un problema di rete/DNS locale alla
-macchina/rete usata per lo sviluppo**: servirebbe un secondo host su una
+un'indisponibilità generale, un blocco individuale o un problema di rete/DNS
+locale alla macchina usata per lo sviluppo**: servirebbe un secondo host su una
 rete diversa per distinguere le due ipotesi. Ancora in corso ~25 minuti
 dopo la prima osservazione (verificato per l'ultima volta alle 13:15).
 
-### 7.2 Terza osservazione, 29/08/2026 pomeriggio: isolata la causa — non è la rete locale
+### 7.2 Terza osservazione, 29/08/2026 pomeriggio: indizi contro un guasto DNS locale
 
 Ripresa la sessione nel pomeriggio, `normattiva.it` era ancora
 irraggiungibile. Stavolta è stato possibile isolare la causa con due
@@ -285,12 +286,11 @@ l'estensione claude-in-chrome non risultava connessa):
   normalmente e `curl https://www.google.com` risponde `200` in meno di
   un secondo.
 
-**Conclusione**: la macchina/rete locale funziona (DNS e connettività
-generale sono a posto); il problema è specifico dell'host
-`147.78.212.12`/`normattiva.it`, che non accetta connessioni sulla 443.
-Questo isola — ma non prova con un secondo host esterno — che la causa
-più probabile è un'avaria o un blocco lato Normattiva o a monte di esso,
-non un difetto di rete locale a questa macchina.
+**Conclusione prudente**: DNS e connettività generale della macchina erano
+funzionanti, mentre quell'host non accettava connessioni sulla 443. Questo
+non distingue un'avaria del servizio da una limitazione individuale o da un
+problema di percorso. Il programma registra quindi un evento indeterminato,
+applica il cooldown e non tenta di aggirarlo cambiando rete o IP.
 
 ## 8. Prestazioni generali
 
@@ -302,11 +302,11 @@ nel perimetro di `dati.normattiva.it` (risponde 409 su alcuni path, es.
 `robots.txt` e i GET con query string) ma non ha mai colpito
 `api.normattiva.it`.
 
-## 9. Un run, non una misura: comportamento durante l'avaria vera (29/08/2026)
+## 9. Un run, non una misura: comportamento durante un incidente osservato (29/08/2026)
 
 **Non è un banco di prova** (quello resta il branch `banco`, non ancora
 iniziato, coi dieci compiti del piano) — è **un solo run** con due
-assistenti diversi collegati allo stesso server MCP durante l'avaria reale
+assistenti diversi collegati allo stesso server MCP durante l'incidente
 documentata sopra, osservato perché capitato mentre il server esisteva già
 e l'avaria era in corso. Un campione di uno per modello non prova nulla
 sulla frequenza di un comportamento; qui si registra solo cosa è successo,
@@ -336,3 +336,11 @@ disciplinato" di Sonnet 5 in generale — le due prove non sono nemmeno
 comparabili alla lettera, perché Sonnet 5 ha visto l'errore muto (bug poi
 corretto) e DeepSeek ha visto il messaggio vero. È un punto di partenza
 per il banco di prova vero, non una misura.
+
+## 10. Canary prudenziale dopo il coordinatore condiviso (4 settembre 2026)
+
+Eseguita una sola consultazione reale dell'art. 1 della Costituzione con un
+database SQLite dedicato: HTTP 200, 1.227 byte, 1.932 ms, quota globale da
+0/60 a 1/60. La ripetizione immediata dello stesso URN è stata servita dalla
+cache: il database registra **1 tentativo HTTP totale e 1 cache hit**, senza
+cooldown né incidente. Nessun retry, test massivo o secondo URN reale.

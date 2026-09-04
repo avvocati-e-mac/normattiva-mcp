@@ -10,6 +10,9 @@ build/
 .coverage
 htmlcov/
 
+# Telemetria locale e chiavi tecniche: mai versionare
+logs/
+
 # Editor e sistema
 .DS_Store
 .vscode/

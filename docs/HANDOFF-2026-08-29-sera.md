@@ -58,7 +58,7 @@ sollevata da uno strumento che non sia una sua `ToolError`** (da
 `mcp.server.mcpserver.exceptions`): il modello legge solo `"Error
 executing tool <nome>"`, il messaggio scritto per lui sparisce. Scoperto
 provando `normattiva_leggi_articolo`/`normattiva_link` a mano da Claude
-Desktop durante l'avaria reale: il modello ha ricevuto un errore muto e ha
+Desktop durante l'indisponibilità osservata: il modello ha ricevuto un errore muto e ha
 offerto di recitare l'articolo **a memoria** come ripiego — esattamente
 il rischio che CLAUDE.md regola 1 vuole escludere.
 
@@ -69,7 +69,7 @@ avvolge l'INTERO corpo dello strumento (non solo la parte di rete —
 toccare la rete) e converte ogni eccezione in `ToolError`: un errore di
 dominio con lo stesso messaggio, un imprevisto sanificato.
 
-**Se aggiungi un quinto strumento (`normattiva_cerca`, branch `ricerca`),
+**Se aggiungi un ulteriore strumento (la ricerca full-text sarebbe il sesto),
 mettigli `@_traduci_errori` fra `@server.tool(...)` e `async def`, o il
 bug si ripete silenziosamente** — nessun test lo scopre se non passa
 davvero per `_tool_manager.call_tool()` o per un client MCP vero: i test
@@ -97,24 +97,15 @@ decoratore, non l'avrebbe mai trovato.
   memoria. Un solo run per modello, non comparabile alla lettera (vedi
   sotto) — dettagli completi in `docs/MISURE.md` §9.
 
-## Fatto operativo da verificare appena riprendi
+## Nota operativa superata
 
-**normattiva.it è ancora in avaria**, confermato più volte durante tutta
-questa sessione (dalle ~12:50 alla sera, oltre 8 ore), da reti diverse
-(inclusa una rete cellulare). Isolato con certezza che **non è un
-problema di rete locale**: `dig` risolve regolarmente, `google.com`
-risponde in <0,3s, ma il connect TCP verso l'IP di normattiva.it
-(`147.78.212.12`) va sempre in timeout. Dettagli completi in
-`docs/MISURE.md` §7, §7.1, §7.2.
-
-Prima di riprendere qualunque test che tocchi la rete:
-```sh
-curl -sS -m 10 -o /dev/null -w "%{http_code}\n" https://www.normattiva.it
-uv run norm doctor
-```
-Se risponde 200, si può testare per la prima volta **con successo** (non
-solo l'errore) `normattiva_leggi_articolo` e `normattiva_leggi_urn` — non
-ancora fatto in questa sessione perché l'avaria non lo ha permesso.
+Questo handoff descrive osservazioni storiche da una singola installazione:
+non prova con certezza un'avaria generale, né esclude un blocco individuale.
+La politica attuale non prescrive test da un'altra rete e vieta cambio di IP,
+VPN o proxy per continuare dopo un rifiuto. In caso di incidente, consulta
+solo lo stato locale, avverti l'utente e non ritentare durante il cooldown.
+Un eventuale canary reale è un'operazione manuale e isolata, non un test CI
+né una verifica ricorrente.
 
 ## Regole da non dimenticare (oltre a quelle del CLAUDE.md)
 

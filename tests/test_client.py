@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import date
+from pathlib import Path
 
 import httpx
 import pytest
@@ -15,9 +16,9 @@ import pytest
 from normattiva_mcp.client import BASE_URL, ClienteNormattiva
 from normattiva_mcp.errori import (
     AttoInesistente,
-    CircuitoAperto,
     CoordinateSbagliate,
     EndpointNonTrovato,
+    RichiestaBloccata,
     ServizioInAvaria,
     SintassiRifiutata,
 )
@@ -55,6 +56,12 @@ _RISPOSTA_200_ARTICOLO = {
     },
     "success": True,
 }
+
+
+@pytest.fixture(autouse=True)
+def _stato_protettivo_isolato(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Il DB e la cache sono condivisi in produzione, non fra test diversi."""
+    monkeypatch.setenv("NORMATTIVA_STATO_DB", str(tmp_path / "protezione.sqlite3"))
 
 
 def _client_con_trasporto(gestore: Callable[[httpx.Request], httpx.Response]) -> ClienteNormattiva:
@@ -160,95 +167,23 @@ class TestErrore400:
 
 
 class TestErrore500EAvaria:
-    """docs/MISURE.md §7: un 500 è "il servizio è giù adesso", mai un
-    giudizio sulla norma."""
+    """Un solo 5xx consuma quota, avvia il cooldown e non viene ritentato."""
 
-    def test_500_persistente_apre_il_circuito(self) -> None:
-        """3 tentativi (1 + 2 ritentativi), tutti 500: il terzo guasto
-        consecutivo raggiunge la soglia del circuit breaker (3), quindi
-        l'eccezione finale è CircuitoAperto — non un ServizioInAvaria
-        generico, perché il client smette di ritentare non appena il
-        circuito scatta."""
+    def test_500_non_viene_ritentato_e_blocca_la_chiamata_successiva(self) -> None:
+        chiamate = 0
 
         def gestore(_request: httpx.Request) -> httpx.Response:
+            nonlocal chiamate
+            chiamate += 1
             return httpx.Response(500, json={"message": "Errore generico", "code": "1000"})
 
         client = _client_con_trasporto(gestore)
-        with pytest.raises(CircuitoAperto):
+        with pytest.raises(ServizioInAvaria):
             client.leggi_articolo(_URN_CC_2043)
-
-    def test_backoff_chiamato_con_le_pause_dichiarate(self) -> None:
-        """L'orologio iniettabile non deve solo evitare l'attesa reale nei
-        test: deve ricevere davvero i valori di pausa dichiarati (1s, poi
-        2s), così un cambiamento silenzioso del backoff verrebbe scoperto
-        anche senza dover aspettare secondi reali."""
-        pause_registrate: list[float] = []
-
-        def gestore(_request: httpx.Request) -> httpx.Response:
-            return httpx.Response(500, json={"message": "Errore generico"})
-
-        client = ClienteNormattiva(dormi=pause_registrate.append)
-        client._http = httpx.Client(transport=httpx.MockTransport(gestore))
-        with pytest.raises(CircuitoAperto):
+        assert chiamate == 1
+        with pytest.raises(RichiestaBloccata, match="cooldown"):
             client.leggi_articolo(_URN_CC_2043)
-        assert pause_registrate == [1.0, 2.0]
-
-    def test_500_poi_200_recupera_al_secondo_tentativo(self) -> None:
-        chiamate = 0
-
-        def gestore(_request: httpx.Request) -> httpx.Response:
-            nonlocal chiamate
-            chiamate += 1
-            if chiamate == 1:
-                return httpx.Response(500, json={"message": "Errore generico"})
-            return httpx.Response(200, json=_RISPOSTA_200_ARTICOLO)
-
-        client = _client_con_trasporto(gestore)
-        esito = client.leggi_articolo(_URN_CC_2043)
-        assert isinstance(esito, Articolo)
-        assert chiamate == 2
-
-
-class TestCircuitoAperto:
-    def test_guasti_ripetuti_aprono_il_circuito(self) -> None:
-        def gestore(_request: httpx.Request) -> httpx.Response:
-            return httpx.Response(500, json={"message": "Errore generico"})
-
-        client = _client_con_trasporto(gestore)
-        # Prima chiamata: 3 tentativi (1 + 2 ritentativi), tutti 500 ->
-        # il terzo fallimento fa scattare il circuito (soglia 3).
-        with pytest.raises((ServizioInAvaria, CircuitoAperto)):
-            client.leggi_articolo(_URN_CC_2043)
-        # Seconda chiamata: il circuito è aperto, deve fallire subito con
-        # CircuitoAperto senza fare altre richieste HTTP.
-        chiamate_dopo = 0
-
-        def gestore_dopo(_request: httpx.Request) -> httpx.Response:
-            nonlocal chiamate_dopo
-            chiamate_dopo += 1
-            return httpx.Response(500, json={"message": "Errore generico"})
-
-        client._http = httpx.Client(transport=httpx.MockTransport(gestore_dopo))
-        with pytest.raises(CircuitoAperto):
-            client.leggi_articolo(_URN_CC_2043)
-        assert chiamate_dopo == 0
-
-    def test_servizio_raggiunto_azzera_il_contatore_guasti(self) -> None:
-        """Un 400/404 (il servizio ha risposto) non conta come guasto:
-        non deve avvicinare il circuito all'apertura."""
-        chiamate = 0
-
-        def gestore(_request: httpx.Request) -> httpx.Response:
-            nonlocal chiamate
-            chiamate += 1
-            return httpx.Response(404, json={"message": "atto non trovato"})
-
-        client = _client_con_trasporto(gestore)
-        for _ in range(5):
-            with pytest.raises(AttoInesistente):
-                client.leggi_articolo(_URN_CC_2043)
-        assert client._circuito.guasti_consecutivi == 0
-        assert client._circuito.aperto_da is None
+        assert chiamate == 1
 
 
 class TestRicadutaSuVigenza:

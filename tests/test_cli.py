@@ -6,11 +6,13 @@ httpx.Client, il punto in cui ClienteNormattiva lo istanzia).
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
 import pytest
 from typer.testing import CliRunner
 
+from normattiva_mcp import cli as cli_module
 from normattiva_mcp.cli import app
 from normattiva_mcp.client import ClienteNormattiva
 
@@ -38,14 +40,22 @@ _RISPOSTA_CC_2043 = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _stato_protettivo_isolato(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Evita che cache, quote e cooldown di un test influenzino un altro."""
+    monkeypatch.setenv("NORMATTIVA_STATO_DB", str(tmp_path / "protezione.sqlite3"))
+
+
 def _monkeypatch_http(monkeypatch: pytest.MonkeyPatch, gestore: Callable) -> None:
     """Sostituisce interamente `cli._nuovo_client` con una fabbrica che
-    restituisce un ClienteNormattiva con trasporto finto (MockTransport,
-    nessuna rete reale) e backoff senza attesa (dormi=no-op): un test che
-    fa scattare il circuit breaker non aspetta più secondi reali."""
+    restituisce un ClienteNormattiva con trasporto finto (MockTransport),
+    database isolato e intervallo senza attesa reale."""
 
     def _fabbrica() -> ClienteNormattiva:
-        client = ClienteNormattiva(dormi=lambda _secondi: None)
+        client = ClienteNormattiva(
+            dormi=lambda _secondi: None,
+            notifica_rete=lambda rapporto: cli_module._console_errori.print(rapporto.avviso),
+        )
         client._http = httpx.Client(transport=httpx.MockTransport(gestore))
         return client
 
@@ -62,6 +72,7 @@ class TestComandoLeggi:
         assert risultato.exit_code == 0
         assert "Risarcimento per fatto illecito" in risultato.stdout
         assert "CC BY 4.0" in risultato.stdout
+        assert "consultazione 1/30 — totale 1/60" in risultato.stderr
 
     def test_leggi_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def gestore(_request: httpx.Request) -> httpx.Response:
@@ -190,6 +201,6 @@ class TestComandoVerifica:
             return httpx.Response(500, json={"message": "Errore generico"})
 
         _monkeypatch_http(monkeypatch, gestore)
-        risultato = runner.invoke(app, ["verifica", "--tutte"])
+        risultato = runner.invoke(app, ["verifica", "--tutte", "--esegui"])
         assert risultato.exit_code == 1
-        assert "nessuna riga è stata giudicata" in risultato.output
+        assert "non verificate" in risultato.output

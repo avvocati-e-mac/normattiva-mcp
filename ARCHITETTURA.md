@@ -9,7 +9,7 @@ Gli ancoraggi sono stabili e citabili da altri documenti: `#figura`,
 `#strati`, `#urn`, `#trappole`, `#guardiani`, `#fonti`, `#due-porte`,
 `#budget`, `#limiti`, `#prove`.
 
-Stato: **CLI e server MCP funzionanti, v0.1.0 pubblicata**. Le sezioni sotto
+Stato: **CLI e server MCP funzionanti**. Le sezioni sotto
 si riempiono di sostanza mano a mano che il branch corrispondente esiste,
 mai in anticipo — un documento che descrive codice non ancora scritto è
 più fuorviante di un documento vuoto. Restano scheletro solo `#trappole`,
@@ -42,11 +42,13 @@ avvocato ──chiede──▶  LLM (anche debole, es. DeepSeek 4 flash)
 | `parser.py` | HTML → esito tipizzato, con i tre guardiani → `#guardiani` |
 | `esiti.py` | gli esiti pubblici (`Articolo`, `Abrogato`, `Preambolo`), la busta `trust` e il sanificatore |
 | `errori.py` | le eccezioni tipizzate del client, con messaggi scritti per un LLM o un avvocato |
-| `client.py` | HTTP: un solo endpoint, i tre 404, il 500 "servizio giù", il circuit breaker, la ricaduta su vigenza |
+| `protezione.py` | SQLite condiviso: cache, quota mobile, serializzazione, cooldown, prenotazioni e telemetria tecnica minima |
+| `client.py` | unico varco HTTP: endpoint Open Data, classificazione delle risposte e ricaduta storica, sempre dietro `protezione.py` |
 | `citazione.py` | resa Markdown del link + attribuzione, un punto solo per CLI e MCP |
-| `config.py` | configurazione da ambiente (solo il timeout: nessuna chiave richiesta) |
+| `config.py` | timeout, percorso SQLite, offline, limiti solo-riducibili e User-Agent stabile |
 | `cli.py` | la porta da terminale → `#due-porte` |
-| `descrizioni.py` | testi dei quattro strumenti MCP e istruzioni del server, sotto il tetto di `#budget` |
+| `skill.py`, `skill_destinazioni.py`, `cli_skill.py` | skill Agent Skills inclusa nel pacchetto, destinazioni client e installazione atomica multipiattaforma |
+| `descrizioni.py` | testi dei cinque strumenti MCP e istruzioni del server, sotto il tetto di `#budget` |
 | `mcp_server.py` | la porta MCP → `#due-porte` |
 
 *(da completare al branch successivo: `ricerca.py`.)*
@@ -71,21 +73,31 @@ con l'avviso `"ATTENZIONE — TESTO NON VIGENTE..."` **dentro** il testo
 della risposta — non solo in un campo fratello che un lettore disattento
 può ignorare (CLAUDE.md regola 2).
 
-## Il circuit breaker e il 500 "servizio giù" {#avaria}
+## Protezione del traffico {#avaria}
 
-Tre guasti consecutivi (5xx o errore di trasporto) aprono il circuito per
-60 secondi; un 400/404 (il servizio ha risposto) lo richiude. Un 500 non è
-mai un giudizio sulla norma cercata: è sempre "il servizio è in avaria
-adesso" (`ServizioInAvaria`), coerente con l'avaria transitoria osservata
-il 29/08/2026 (docs/MISURE.md §7). Nessun ritentativo su 4xx: un 400 o un
-404 sono risposte corrette a una domanda malformata o a coordinate
-sbagliate, non un guasto.
+`ProtezioneTraffico` è l'unico coordinatore di ogni richiesta reale.
+Con una transazione SQLite immediata, condivisa da CLI, MCP e processi,
+serve prima la cache e deduplica la stessa URN concorrente; altrimenti lascia
+partire una sola chiamata e impone almeno 5 secondi dall'ultima. Non esiste
+alcun retry automatico.
 
-`ClienteNormattiva.dormi` è la funzione di pausa del backoff, iniettabile:
-nei test si passa una funzione che non dorme davvero, così un circuito che
-apre dopo tre guasti non fa aspettare la suite per secondi reali — la
-pausa resta comunque misurata (chiamata con il valore giusto), solo non
-eseguita per davvero (`tests/test_client.py::test_backoff_chiamato_con_le_pause_dichiarate`).
+I limiti prudenti **locali, non dichiarati da Normattiva**, sono 30
+consultazioni, 2 diagnosi e 60 richieste totali in 24 ore mobili. Le variabili
+d'ambiente possono solo abbassarli. Ogni tentativo HTTP, riuscito o fallito,
+consuma quota. Cache: 7 giorni per vigente, 30 per storico, un'ora per 400/404.
+`NORMATTIVA_OFFLINE=1` legge esclusivamente cache; un DB non disponibile
+fallisce chiuso, prima della rete.
+
+Un 429 sospende per `Retry-After` e almeno 6 ore; 401/403/409 per 24 ore;
+5xx o risposta malformata per 15 minuti. Timeout, reset e TLS sono eventi
+indeterminati (non una prova di ban) e sospendono 15 minuti con crescita fino
+a 24 ore. Un cooldown non è aggirabile cambiando IP, VPN o proxy.
+
+Il rapporto `RapportoRete` accompagna ogni esito: origine rete/cache, data di
+acquisizione, quote, residuo, cooldown, ultimo incidente e livello. La CLI
+mostra il consumo reale su stderr; MCP restituisce `protezione_rete` e un
+avviso leggibile. A livello `critico` o `bloccato` il modello deve avvertire
+l'utente e fermare il workflow, non continuarlo con tentativi alternativi.
 
 ## La grammatica dell'URN {#urn}
 
@@ -197,10 +209,10 @@ per intero nei test senza dover patchare `httpx.Client` dentro `client.py`.
 
 Comandi: `leggi` (testo verificato), `link` (citazione Markdown, verifica
 di default), `urn` (legge un URN già in mano), `fonti` (elenca o cerca
-nella tabella), `doctor` (sonda **specificamente** `dettaglio-atto-urn`,
-non un endpoint qualsiasi — l'avaria del 29/08/2026 ha colpito solo
-quello mentre il resto rispondeva), `verifica --tutte` (l'unico modo di
-controllare l'intera tabella contro l'API).
+nella tabella), `stato` (solo SQLite), `doctor` (al massimo una sonda dello
+specifico `dettaglio-atto-urn`, mai durante un cooldown) e `verifica --tutte`
+(prima stima il costo; `--esegui` prenota tutto il budget e può avviare una
+verifica completa ogni 7 giorni).
 
 **`norm verifica` e `norm fonti-aggiungi` esistono solo qui, mai come
 strumento MCP**: fanno decine di richieste e non devono poter essere
@@ -220,16 +232,15 @@ non-decidere: chiama `lookup.risolvi_riferimento` (condivisa con `cli.py`,
 non una copia — CLAUDE.md regola 6), `client.py`, `fonti.py`, `citazione.py`.
 Trasporto **stdio soltanto**. Un solo `ClienteNormattiva` per processo
 (`ApplicazioneMcp`, costruito nel `lifespan`), non uno per chiamata come in
-`cli.py`: il circuit breaker di `client.py` mantiene stato fra le richieste,
-e quello stato conta solo se il client sopravvive fra una chiamata e l'altra.
-Un `asyncio.Lock` serializza le richieste allo stesso client.
+`cli.py`; il coordinamento fra processi non dipende però dalla durata del
+client, perché vive nel database SQLite. Un `asyncio.Lock` evita anche di
+creare lavoro duplicato dentro lo stesso processo.
 
-**Quattro strumenti, non cinque**: `normattiva_leggi_articolo`,
+**Cinque strumenti**: `normattiva_leggi_articolo`,
 `normattiva_link`, `normattiva_trova_fonte` (l'unico locale, nessuna rete),
-`normattiva_leggi_urn`. `normattiva_cerca` dipende da `ricerca.py`, non
-ancora scritto, e arriva al branch `ricerca` successivo — il test "il
-server espone N strumenti" (`tests/test_mcp_server.py`) dichiara 4, da
-alzare a 5 in quel branch.
+`normattiva_leggi_urn` e `normattiva_stato_rete` (solo SQLite, nessuna rete).
+Qualunque futura ricerca massiva deve usare un meccanismo ufficiale
+asincrono/bulk: non verrà aggiunto un fan-out articolo per articolo.
 
 **Errori sanificati, ma soprattutto tradotti in `ToolError`.** Il principio
 è lo stesso del gemello `mcp-bdm` (un errore di dominio porta già un
@@ -239,7 +250,7 @@ mano da Claude Desktop il 29/08/2026, non dai test: l'SDK MCP (`mcp`
 2.1.1, `mcp.server.mcpserver.tools.base.Tool.run`) tratta come **crash
 silenzioso** qualunque eccezione che non sia una sua `ToolError` — il
 modello legge solo `"Error executing tool <nome>"`, il messaggio scritto
-apposta sparisce. Ognuno dei quattro strumenti passa quindi da
+apposta sparisce. Ognuno dei cinque strumenti passa quindi da
 `_traduci_errori` (decoratore applicato fra `@server.tool(...)` e `async
 def`, avvolge l'INTERO corpo, non solo la parte di rete — `risolvi_riferimento`
 e `analizza_urn` sollevano i loro errori prima di toccare la rete): un
@@ -248,7 +259,7 @@ errore di dominio (`NormattivaErrore`, `RiferimentoSconosciuto`,
 (messaggio conservato); qualunque altra eccezione diventa un `ToolError`
 col solo `type(exc).__name__` più un testo nostro, mai `str(exc)` — un
 messaggio di libreria potrebbe citare un frammento della risposta di
-Normattiva. **Un quinto strumento senza questo decoratore ripete il bug in
+Normattiva. **Un nuovo strumento senza questo decoratore ripete il bug in
 silenzio**: nessun test che chiami la funzione direttamente lo scopre se
 non passa per l'SDK vero (`tests/test_mcp_server.py` lo verifica proprio
 perché chiama la funzione già decorata).
@@ -261,7 +272,7 @@ il preambolo al posto dell'articolo passano tutti da lì.
 ## Il budget del modello debole {#budget}
 
 Il tetto (`tests/test_tetto_descrizioni.py`, `TETTO_CARATTERI = 5.500`)
-somma istruzioni del server + descrizioni dei quattro strumenti +
+somma istruzioni del server + descrizioni dei cinque strumenti +
 descrizioni dei parametri — lo stesso canale conta tutti e tre, perché una
 frase spostata dall'uno all'altro viaggia comunque nello stesso `tools/list`
 (difetto misurato nel gemello `italgiure-web-mcp`: contare solo le
@@ -269,7 +280,7 @@ descrizioni degli strumenti lascia un canale gratuito dove nascondere
 prosa). Misura del 29 agosto 2026, branch `mcp`: 1.451 (istruzioni, dopo
 l'aggiunta della guida diagnostica sull'avaria — `norm doctor`, un'altra
 rete) + 2.673 (descrizioni) + 0 (parametri) = **4.124** caratteri, con
-margine dichiarato per il quinto strumento del branch `ricerca`.
+margine dichiarato per strumenti futuri.
 
 Il criterio per ogni riga in `descrizioni.py`: dire solo ciò che cambia una
 decisione del modello — quale strumento chiamare, come riempirne i

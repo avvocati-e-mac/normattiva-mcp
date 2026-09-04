@@ -1,42 +1,7 @@
-"""Il server MCP `normattiva-mcp`: quattro strumenti, stdio soltanto.
+"""Strumenti MCP stdio, tutti dietro il coordinatore SQLite condiviso.
 
-LE DUE PORTE NON SI CHIAMANO FRA LORO (CLAUDE.md, "Struttura e stile del
-codice"): questo modulo non reimplementa la risoluzione degli alias o la
-lettura del testo, chiama `lookup.py`, `client.py`, `fonti.py`,
-`citazione.py` — esattamente come fa `cli.py`. La sola cosa che aggiunge è
-la traduzione verso il protocollo MCP.
-
-TRASPORTO STDIO SOLTANTO: `main()` chiama `server.run()` col predefinito
-`transport="stdio"`, mai `sse` o `streamable-http`.
-
-QUATTRO STRUMENTI, NON CINQUE: `normattiva_cerca` (ricerca full-text)
-dipende da `ricerca.py`, non ancora scritto — arriva al branch `ricerca`
-successivo (vedi docs/HANDOFF-2026-08-29.md).
-
-UN SOLO CLIENT PER PROCESSO, non uno per chiamata come in `cli.py`: il
-circuit breaker di `ClienteNormattiva` (client.py) mantiene stato fra le
-richieste, e quello stato serve a poco se ogni chiamata parte da un
-client nuovo. `_lucchetto` serializza le richieste allo stesso client fra
-chiamate concorrenti — questo server non ha bisogno di parallelismo verso
-un'unica API pubblica.
-
-ERRORI SANIFICATI, E PERCHÉ DEVONO ESSERE `ToolError`. Un errore di
-dominio (`NormattivaErrore`, `RiferimentoSconosciuto`,
-`FonteNonDisponibileErrore`, `UrnNonValido`) porta già un messaggio scritto
-per essere letto da un modello o da un avvocato (CLAUDE.md, regola 1) —
-ma l'SDK (`mcp.server.mcpserver.tools.base.Tool.run`) tratta come un
-crash silenzioso QUALUNQUE eccezione che non sia una sua `ToolError`:
-il modello legge solo "Error executing tool <nome>", perdendo il
-messaggio. Ogni strumento passa quindi da `_traduci_errori`, che converte
-un errore di dominio in `ToolError(str(exc))` (messaggio conservato) e
-qualunque altra eccezione in un `ToolError` col solo `type(exc).__name__`
-più un testo nostro, mai `str(exc)` — potrebbe citare un frammento della
-risposta di Normattiva. **Scoperto provando il server a mano da Claude
-Desktop il 29/08/2026** (durante l'avaria in corso: il modello vedeva un
-errore muto invece del messaggio "Normattiva è stata sospesa..."), mai
-dai test che chiamavano le funzioni direttamente saltando l'SDK — da qui
-`tests/test_mcp_server.py` verifica anche il tipo `ToolError`, non solo
-il messaggio.
+Le eccezioni di dominio diventano `ToolError`; le eccezioni inattese sono
+sanificate e non espongono testo ricevuto da Normattiva.
 """
 
 from __future__ import annotations
@@ -45,12 +10,12 @@ import asyncio
 import functools
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
 
 from . import __version__
 from .citazione import link_markdown, testo_visibile_di_default
@@ -62,6 +27,23 @@ from .esiti import Abrogato, Articolo, Esito, Preambolo
 from .fonti import Fonte, FonteNonDisponibile, carica_tabella
 from .lookup import FonteNonDisponibileErrore, RiferimentoSconosciuto
 from .lookup import risolvi_riferimento as _risolvi_riferimento
+from .mcp_output import (
+    EsitoOutput,
+    FonteOutput,
+    LinkOutput,
+    ProtezioneReteOutput,
+    StatoReteOutput,
+)
+from .mcp_output import (
+    avvisi_rapporti as _avvisi_rapporti_per_client,
+)
+from .mcp_output import (
+    esito_a_output as _esito_a_output,
+)
+from .mcp_output import (
+    protezione_rete as _protezione_rete_per_client,
+)
+from .protezione import RapportoRete
 from .urn import UrnNonValido
 from .urn import analizza as analizza_urn
 
@@ -75,30 +57,51 @@ _ERRORI_DI_DOMINIO_NOTI = (
 avvocato (CLAUDE.md regola 1): viaggiano verso il chiamante MCP tali e
 quali, mai sanificate."""
 
+_RAPPORTI_ERRORE: ContextVar[tuple[RapportoRete, ...]] = ContextVar("rapporti_errore", default=())
+"""Rapporti del tentativo dell'attuale tool, mai quelli di una chiamata
+precedente concorrente. Serve anche quando MCP può restituire solo ToolError."""
+
+
+def _suffisso_protezione_errore() -> str:
+    """Espone quota e blocchi generati localmente, senza testo remoto."""
+    rapporti = _RAPPORTI_ERRORE.get()
+    if not rapporti:
+        return ""
+    ultimo = rapporti[-1]
+    avvisi = [rapporto.avviso for rapporto in rapporti]
+    stato = f"livello {ultimo.livello}"
+    if ultimo.cooldown_fino:
+        stato += f", cooldown fino a {ultimo.cooldown_fino}"
+    avvisi.append(f"Protezione rete: {stato}.")
+    return "\n" + "\n".join(avvisi)
+
 
 def _traduci_errori(fn):
     """Converte ogni eccezione sollevata da uno strumento in `ToolError`
     (vedi "ERRORI SANIFICATI" nel docstring del modulo). Applicato a
-    ognuno dei quattro strumenti, non solo dentro `_rete`: `_risolvi_riferimento`
+    ognuno degli strumenti, non solo dentro `_rete`: `_risolvi_riferimento`
     e `analizza_urn` sollevano i loro errori PRIMA di entrare in `_rete`,
     quindi la traduzione deve avvolgere l'intero corpo dello strumento."""
 
     @functools.wraps(fn)
     async def involucro(*args, **kwargs):
+        token = _RAPPORTI_ERRORE.set(())
         try:
             return await fn(*args, **kwargs)
         except ToolError:
             raise
         except _ERRORI_DI_DOMINIO_NOTI as exc:
-            raise ToolError(str(exc)) from exc
+            raise ToolError(str(exc) + _suffisso_protezione_errore()) from exc
         except Exception as exc:
             raise ToolError(
                 f"{type(exc).__name__}: si è fermato un errore imprevisto, non "
                 "riconosciuto come uno dei casi noti di questo programma. Il "
                 "messaggio originale non viene mostrato perché potrebbe contenere "
                 "un frammento della risposta di Normattiva. Se si ripete, va "
-                "segnalato al titolare del programma."
+                "segnalato al titolare del programma." + _suffisso_protezione_errore()
             ) from exc
+        finally:
+            _RAPPORTI_ERRORE.reset(token)
 
     return involucro
 
@@ -117,7 +120,7 @@ class ApplicazioneMcp:
 @asynccontextmanager
 async def _lifespan(_: MCPServer[ApplicazioneMcp]) -> AsyncIterator[ApplicazioneMcp]:
     config = Config.da_ambiente()
-    client = ClienteNormattiva(timeout_secondi=config.timeout_secondi)
+    client = ClienteNormattiva(config=config, timeout_secondi=config.timeout_secondi)
     try:
         yield ApplicazioneMcp(client=client)
     finally:
@@ -136,7 +139,16 @@ async def _rete[T](app: ApplicazioneMcp, azione: Callable[[], T]) -> T:
     traduzione degli errori vive in `_traduci_errori`, non qui: avvolge
     l'intero strumento, non solo la parte che tocca la rete."""
     async with app.lucchetto:
-        return azione()
+        try:
+            return azione()
+        finally:
+            _RAPPORTI_ERRORE.set(
+                tuple(
+                    rapporto
+                    for rapporto in app.client.ultimi_rapporti
+                    if rapporto.origine == "rete"
+                )
+            )
 
 
 RETE = ToolAnnotations(
@@ -162,78 +174,14 @@ server = MCPServer[ApplicazioneMcp](
 mcp = server
 
 
-# ============================================================================
-# Esito comune a normattiva_leggi_articolo e normattiva_leggi_urn.
-# ============================================================================
+def _protezione_rete(app: ApplicazioneMcp, *, stato_locale: bool = False) -> ProtezioneReteOutput:
+    """Compatibilità locale: la conversione vive in `mcp_output`."""
+    return _protezione_rete_per_client(app.client, stato_locale=stato_locale)
 
 
-class EsitoOutput(BaseModel):
-    """Un solo schema per i tre esiti possibili (`esito` discrimina), così i
-    due strumenti che leggono un articolo condividono un'unica forma di
-    uscita — nessuna copia divergente fra loro."""
-
-    esito: str
-    urn: str
-    permalink: str
-    heading: str | None = None
-    testo: str | None = None
-    aggiornamenti: list[str] = Field(default_factory=list)
-    vigenza_storica: dict[str, str] | None = None
-    messaggio: str | None = None
-    data_abrogazione: str | None = None
-    caratteri: int | None = None
-    incipit: str | None = None
-    attribuzione: str
-    avvisi: list[str] = Field(default_factory=list)
-    """Ogni avvertenza va qui come frase leggibile, mai solo in un campo
-    fratello ignorabile (CLAUDE.md regola 2)."""
-
-
-def _esito_a_output(esito: Esito, avvisi_extra: tuple[str, ...] = ()) -> EsitoOutput:
-    avvisi = list(avvisi_extra)
-    if isinstance(esito, Articolo):
-        vigenza_storica = None
-        if esito.vigenza_storica:
-            vigenza_storica = {
-                "data": esito.vigenza_storica.data.isoformat(),
-                "avviso": esito.vigenza_storica.avviso,
-            }
-            avvisi.append(esito.vigenza_storica.avviso)
-        return EsitoOutput(
-            esito="articolo",
-            urn=esito.urn.stringa,
-            permalink=esito.permalink,
-            heading=esito.heading,
-            testo=esito.testo,
-            aggiornamenti=list(esito.aggiornamenti),
-            vigenza_storica=vigenza_storica,
-            attribuzione=esito.attribuzione,
-            avvisi=avvisi,
-        )
-    if isinstance(esito, Abrogato):
-        avvisi.append(f"Articolo abrogato: {esito.messaggio}")
-        return EsitoOutput(
-            esito="abrogato",
-            urn=esito.urn.stringa,
-            permalink=esito.permalink,
-            messaggio=esito.messaggio,
-            data_abrogazione=esito.data_abrogazione.isoformat() if esito.data_abrogazione else None,
-            attribuzione=esito.attribuzione,
-            avvisi=avvisi,
-        )
-    avvisi.append(
-        "Attenzione: Normattiva ha restituito il preambolo di promulgazione, "
-        "non l'articolo richiesto."
-    )
-    return EsitoOutput(
-        esito="preambolo",
-        urn=esito.urn.stringa,
-        permalink=esito.permalink,
-        caratteri=esito.caratteri,
-        incipit=esito.incipit,
-        attribuzione=esito.attribuzione,
-        avvisi=avvisi,
-    )
+def _avvisi_rapporti(app: ApplicazioneMcp) -> list[str]:
+    """Compatibilità locale: la conversione vive in `mcp_output`."""
+    return _avvisi_rapporti_per_client(app.client)
 
 
 # ============================================================================
@@ -264,18 +212,13 @@ async def normattiva_leggi_articolo(
         return app.client.leggi_articolo(risoluzione.urn)
 
     esito = await _rete(app, azione)
-    return _esito_a_output(esito, avvisi_extra=risoluzione.avvertenze)
+    avvisi = (*risoluzione.avvertenze, *_avvisi_rapporti(app))
+    return _esito_a_output(esito, _protezione_rete(app), avvisi_extra=avvisi)
 
 
 # ============================================================================
 # 2. normattiva_link — rete (verifica di default).
 # ============================================================================
-
-
-class LinkOutput(BaseModel):
-    markdown: str
-    verificato: bool | None
-    avviso: str | None = None
 
 
 _TITOLO, _DESCR = _d("normattiva_link")
@@ -316,6 +259,8 @@ async def normattiva_link(
                 "l'URN potrebbe non essere corretto."
             )
 
+        avvisi.extend(_avvisi_rapporti(app))
+
     nome = risoluzione.fonte.nome_canonico if risoluzione.fonte else fonte
     markdown = link_markdown(
         risoluzione.urn, testo_visibile=testo_visibile_di_default(nome, articolo)
@@ -324,26 +269,14 @@ async def normattiva_link(
         markdown=markdown,
         verificato=verificato,
         avviso=" ".join(avvisi) if avvisi else None,
+        avvisi=avvisi,
+        protezione_rete=_protezione_rete(app, stato_locale=not verifica),
     )
 
 
 # ============================================================================
 # 3. normattiva_trova_fonte — locale, nessuna richiesta di rete.
 # ============================================================================
-
-
-class FonteOutput(BaseModel):
-    trovata: bool
-    disponibile: bool = True
-    nome_canonico: str | None = None
-    tipo: str | None = None
-    numero: int | None = None
-    data: str | None = None
-    allegato: int | None = None
-    stato: str | None = None
-    nota_stato: str | None = None
-    alias: list[str] = Field(default_factory=list)
-    nota: str | None = None
 
 
 _TITOLO, _DESCR = _d("normattiva_trova_fonte")
@@ -367,6 +300,7 @@ async def normattiva_trova_fonte(ctx: Context, testo: str) -> FonteOutput:
     if isinstance(risultato, Fonte):
         return FonteOutput(
             trovata=True,
+            disponibile=True,
             nome_canonico=risultato.nome_canonico,
             tipo=risultato.tipo.value,
             numero=risultato.numero,
@@ -409,7 +343,34 @@ async def normattiva_leggi_urn(ctx: Context, urn: str) -> EsitoOutput:
         return app.client.leggi_articolo(u)
 
     esito = await _rete(app, azione)
-    return _esito_a_output(esito)
+    return _esito_a_output(esito, _protezione_rete(app), avvisi_extra=tuple(_avvisi_rapporti(app)))
+
+
+# ============================================================================
+# 5. normattiva_stato_rete — locale, quota e telemetria aggregata.
+# ============================================================================
+
+
+_TITOLO, _DESCR = _d("normattiva_stato_rete")
+
+
+@server.tool(
+    name="normattiva_stato_rete",
+    title=_TITOLO,
+    description=_DESCR,
+    annotations=LOCALE,
+    structured_output=True,
+)
+@_traduci_errori
+async def normattiva_stato_rete(ctx: Context) -> StatoReteOutput:
+    """Legge soltanto il database locale; non contatta Normattiva."""
+    app = _applicazione(ctx)
+    assert app.client.protezione is not None
+    rapporto = app.client.protezione.stato()
+    return StatoReteOutput(
+        rapporto=ProtezioneReteOutput(**rapporto.modello()),
+        aggregati_giornalieri=app.client.protezione.aggregati_giornalieri(),
+    )
 
 
 def main() -> None:

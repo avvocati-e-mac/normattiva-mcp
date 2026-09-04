@@ -59,7 +59,27 @@ non da implementare a tavolino.
 ## L'endpoint può andare in avaria senza preavviso
 
 Il BFF (`bff-opendata`) non è un'API pubblica versionata con un contratto
-dichiarato. Il 29 agosto 2026 l'endpoint del testo ha avuto un'avaria di
-circa dieci minuti (vedi `docs/MISURE.md` §7). Il programma la tratta come
-tale — un messaggio esplicito, nessun ritentativo automatico — ma non può
-prevenirla né garantire che non si ripeta più a lungo.
+dichiarato. Il 29 agosto 2026 l'endpoint del testo ha dato un incidente
+compatibile con un'avaria, ma non conclusivamente distinguibile da una
+limitazione individuale (vedi `docs/MISURE.md` §7). Il programma registra
+l'incertezza, applica un cooldown e non ritenta automaticamente; non può
+prevenire né qualificare definitivamente l'evento.
+
+## Le soglie di traffico sono locali, non un contratto del gestore
+
+Le quote 30 consultazioni, 2 diagnosi e 60 richieste complessive in 24 ore
+mobili sono una cautela deliberatamente conservativa di questo progetto. Non
+derivano da una comunicazione di Normattiva e non vanno interpretate come un
+permesso a raggiungerle. Possono essere abbassate dall'utente, non alzate da
+flag CLI o strumenti MCP.
+
+Il progetto non usa proxy, rotazione/cambio IP o VPN per aggirare cooldown e
+non fa scraping HTML né browser automation. Un 429, un errore di autorizzazione
+o un evento di trasporto fermano localmente i tentativi secondo la politica
+documentata nel README. L'assenza di errori non autorizza aumenti automatici.
+
+Prima di aumentare sostanzialmente i volumi o mettere il servizio a
+disposizione di terzi, occorre chiedere al gestore indicazioni scritte su
+limiti, canale bulk/asincrono e modalità preferite. Un'eventuale elaborazione
+massiva futura dovrà usare esclusivamente quel canale ufficiale, non richieste
+articolo per articolo.

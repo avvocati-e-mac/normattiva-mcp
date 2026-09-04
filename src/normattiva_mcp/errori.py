@@ -16,6 +16,22 @@ class NormattivaErrore(Exception):
     """Radice comune di tutti gli errori del client."""
 
 
+class ProtezioneNonDisponibile(NormattivaErrore):
+    def __init__(self, dettaglio: str) -> None:
+        super().__init__(
+            "Il database locale di protezione non è disponibile: nessuna richiesta è stata "
+            f"inviata a Normattiva ({dettaglio})."
+        )
+
+
+class RichiestaBloccata(NormattivaErrore):
+    def __init__(self, motivo: str) -> None:
+        super().__init__(
+            f"Richiesta fermata localmente: {motivo}. Avverti l'utente e non ritentare, "
+            "non cambiare IP, VPN o proxy per proseguire."
+        )
+
+
 class AttoInesistente(NormattivaErrore):
     """404 breve (~43 byte): l'atto non esiste."""
 
@@ -89,7 +105,7 @@ class TestoAssente(NormattivaErrore):
 
 
 class ServizioInAvaria(NormattivaErrore):
-    """500: il servizio è in avaria ADESSO. Non un giudizio sulla norma,
+    """5xx: anomalia temporanea, non prova da sola un'avaria generale.
     non un giudizio su una fonte della tabella — solo un fatto temporaneo
     (docs/MISURE.md §7, misurato il 29/08/2026: l'endpoint del testo è
     stato giù per una decina di minuti mentre il resto dell'API
@@ -98,25 +114,18 @@ class ServizioInAvaria(NormattivaErrore):
     def __init__(self, status: int) -> None:
         self.status = status
         super().__init__(
-            f"Normattiva ha risposto {status}: il servizio è in avaria adesso, "
-            "non un giudizio sulla norma cercata. Riprova più tardi."
+            f"Normattiva ha risposto {status}: è un'anomalia temporanea, non prova da "
+            "sola un'avaria generale e non è un giudizio sulla norma cercata. È stato "
+            "applicato un cooldown locale; non ritentare."
         )
 
 
 class GuastoDiTrasporto(NormattivaErrore):
-    """Un guasto di rete/trasporto, dopo i ritentativi consentiti."""
+    """Un singolo evento di rete indeterminato, senza retry automatico."""
 
     def __init__(self, dettaglio: str) -> None:
         self.dettaglio = dettaglio
-        super().__init__(f"Errore di rete verso Normattiva: {dettaglio}")
-
-
-class CircuitoAperto(NormattivaErrore):
-    """Il circuit breaker ha sospeso le chiamate dopo guasti ripetuti."""
-
-    def __init__(self, riapre_tra_secondi: float) -> None:
-        self.riapre_tra_secondi = riapre_tra_secondi
         super().__init__(
-            f"Normattiva è stata sospesa dopo guasti ripetuti: "
-            f"riprova fra {int(riapre_tra_secondi)} s."
+            f"Evento di rete indeterminato verso Normattiva: {dettaglio}. Non dimostra "
+            "un ban né un'avaria generale; è stato applicato un cooldown e non va ritentato."
         )

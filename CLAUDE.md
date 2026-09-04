@@ -32,6 +32,7 @@ per fare, a destra ciò che devi avere letto prima di farlo.
 | toccare `urn.py` o `estensioni.py` | `docs/MISURE.md`, sezione sulla grammatica URN |
 | toccare `parser.py` o `guardiani.py` | `docs/MISURE.md`, sezione sulle trappole, **e** le fixture in `tests/fixtures/risposte/` |
 | toccare `client.py` | `docs/MISURE.md`, sezione sull'API e sui tre tipi di 404/500 |
+| toccare `protezione.py` o i limiti di rete | [ARCHITETTURA.md](ARCHITETTURA.md#avaria) e README.md, poi i test offline in `tests/test_protezione.py` |
 | toccare `fonti.py` o `data/fonti.json` | la regola della provenienza qui sotto |
 | toccare `descrizioni.py` | il test del tetto di caratteri, prima di aggiungere una riga |
 | una decisione architetturale non coperta | [ARCHITETTURA.md](ARCHITETTURA.md), poi `docs/IDEE-SCARTATE.md`; se anche lì manca, si chiede al proprietario, non si inventa |
@@ -62,6 +63,13 @@ numero di riga: i numeri invecchiano, i nomi no.
    `citazione.py`), mai ricopiato.
 7. **Chi aggiunge una fonte alla tabella scrive la provenienza e un
    articolo di controllo.** Una riga senza prova non entra.
+8. **Rete prudente e fail-closed.** Ogni HTTP passa da `ProtezioneTraffico`;
+   niente retry automatici, scraping HTML, browser automation, proxy o cambio
+   IP/VPN. Un cooldown o un livello `critico`/`bloccato` impone di avvertire
+   l'utente e fermare il workflow.
+9. **I limiti sono locali.** Le soglie 30/2/60 sono cautele del progetto,
+   non limiti dichiarati da Normattiva; possono solo essere ridotte. Prima di
+   aumentare volume o servire terzi servono istruzioni scritte del gestore.
 
 ## Struttura e stile del codice
 

@@ -19,6 +19,7 @@ from rich.table import Table
 
 from normattiva_mcp import __version__
 from normattiva_mcp.citazione import link_markdown, riga_attribuzione, testo_visibile_di_default
+from normattiva_mcp.cli_skill import skill_app
 from normattiva_mcp.client import BASE_URL, ClienteNormattiva
 from normattiva_mcp.config import Config
 from normattiva_mcp.errori import NormattivaErrore
@@ -29,6 +30,7 @@ from normattiva_mcp.lookup import (
     RiferimentoSconosciuto,
 )
 from normattiva_mcp.lookup import risolvi_riferimento as _risolvi_riferimento_condiviso
+from normattiva_mcp.protezione import ProtezioneTraffico
 from normattiva_mcp.urn import UrnNonValido
 from normattiva_mcp.urn import analizza as analizza_urn
 
@@ -37,6 +39,7 @@ app = typer.Typer(
     help="Leggi, verifica e cita norme italiane da Normattiva.it.",
     no_args_is_help=True,
 )
+app.add_typer(skill_app, name="skill")
 _console = Console()
 _console_errori = Console(stderr=True)
 
@@ -54,12 +57,36 @@ def _nuovo_client() -> ClienteNormattiva:
     """Un unico punto di costruzione del client, per tutti i comandi.
 
     In un test, `normattiva_mcp.cli._nuovo_client` si sostituisce
-    interamente (monkeypatch) per restituire un client con trasporto
-    finto e backoff senza attesa — più semplice e più robusto che
+    interamente (monkeypatch) per restituire un client con trasporto finto
+    e database di protezione temporaneo — più semplice e più robusto che
     patchare `httpx.Client` a livello di modulo dentro client.py.
     """
     config = Config.da_ambiente()
-    return ClienteNormattiva(timeout_secondi=config.timeout_secondi)
+
+    def avvisa(rapporto) -> None:
+        # Il client invoca il callback solo dopo un tentativo HTTP reale;
+        # cache e blocchi locali non devono fingere di aver consumato quota.
+        _console_errori.print(_remoto(rapporto.avviso))
+
+    return ClienteNormattiva(
+        timeout_secondi=config.timeout_secondi,
+        config=config,
+        notifica_rete=avvisa,
+    )
+
+
+def _client_o_esci() -> ClienteNormattiva:
+    """Costruisce il client, trasformando il fail-closed in errore CLI.
+
+    `ProtezioneTraffico` si inizializza nel costruttore del client: se il
+    suo database non è disponibile, nessun comando di rete deve esporre un
+    traceback o provare a continuare senza coordinamento.
+    """
+    try:
+        return _nuovo_client()
+    except NormattivaErrore as errore:
+        _stampa_errore(errore)
+        raise typer.Exit(code=1) from None
 
 
 def _stampa_errore(errore: Exception) -> None:
@@ -178,6 +205,11 @@ def leggi(
         None, "--vigenza", help="Data YYYY-MM-DD per il testo storico."
     ),
     come_json: bool = typer.Option(False, "--json", help="Uscita in JSON invece che leggibile."),
+    aggiorna: bool = typer.Option(
+        False,
+        "--aggiorna",
+        help="Ignora la cache locale e chiede un aggiornamento, nel rispetto delle protezioni.",
+    ),
 ) -> None:
     """Legge il testo di un articolo, verificato."""
     try:
@@ -195,9 +227,9 @@ def leggi(
     for avviso in risoluzione.avvertenze:
         _console.print(f"[yellow]Avviso: {avviso}[/yellow]")
 
-    with _nuovo_client() as client:
+    with _client_o_esci() as client:
         try:
-            esito = client.leggi_articolo(risoluzione.urn)
+            esito = client.leggi_articolo(risoluzione.urn, aggiorna=aggiorna)
         except NormattivaErrore as errore:
             _stampa_errore(errore)
             raise typer.Exit(code=1) from None
@@ -215,6 +247,11 @@ def link(
         "--non-verificare",
         help="Non controllare l'esistenza dell'atto (più veloce, meno sicuro).",
     ),
+    aggiorna: bool = typer.Option(
+        False,
+        "--aggiorna",
+        help="Durante la verifica, ignora la cache locale nel rispetto delle protezioni.",
+    ),
 ) -> None:
     """Costruisce e — di default — verifica la citazione Markdown di un
     articolo, senza restituirne il testo completo."""
@@ -226,9 +263,9 @@ def link(
 
     verificato: bool | None = None
     if not non_verificare:
-        with _nuovo_client() as client:
+        with _client_o_esci() as client:
             try:
-                esito = client.leggi_articolo(risoluzione.urn)
+                esito = client.leggi_articolo(risoluzione.urn, aggiorna=aggiorna)
                 verificato = isinstance(esito, Articolo)
                 if isinstance(esito, Abrogato):
                     messaggio = _remoto(esito.messaggio)
@@ -262,6 +299,11 @@ def link(
 def urn(
     urn_completo: str = typer.Argument(..., help="Un URN Normattiva completo."),
     come_json: bool = typer.Option(False, "--json"),
+    aggiorna: bool = typer.Option(
+        False,
+        "--aggiorna",
+        help="Ignora la cache locale e chiede un aggiornamento, nel rispetto delle protezioni.",
+    ),
 ) -> None:
     """Legge un URN già in mano (es. un rinvio trovato in un testo)."""
     try:
@@ -270,9 +312,9 @@ def urn(
         _stampa_errore(errore)
         raise typer.Exit(code=1) from None
 
-    with _nuovo_client() as client:
+    with _client_o_esci() as client:
         try:
-            esito = client.leggi_articolo(u)
+            esito = client.leggi_articolo(u, aggiorna=aggiorna)
         except NormattivaErrore as errore:
             _stampa_errore(errore)
             raise typer.Exit(code=1) from None
@@ -320,21 +362,27 @@ def fonti(
 
 @app.command()
 def doctor() -> None:
-    """Controlla se il servizio risponde — sonda specificamente l'endpoint
-    del testo (dettaglio-atto-urn), non un endpoint qualsiasi: l'avaria
-    del 29/08/2026 ha colpito solo quello mentre il resto rispondeva
-    (docs/MISURE.md §7)."""
+    """Esegue una sola diagnosi dell'endpoint del testo.
+
+    Il coordinatore può fermarla prima della rete per cooldown, quota o
+    modalità offline: in questi casi non tenta scorciatoie né altri endpoint.
+    """
     _console.print(f"normattiva-mcp {__version__}")
     _console.print(f"Base API: {BASE_URL}")
 
-    with _nuovo_client() as client:
+    with _client_o_esci() as client:
         u = analizza_urn("urn:nir:stato:costituzione:1947-12-27;1~art1")
         try:
-            esito = client.leggi_articolo(u)
+            esito = client.leggi_articolo(
+                u,
+                attivita="diagnosi",
+                aggiorna=True,
+                recupera_storico=False,
+            )
         except NormattivaErrore as errore:
             messaggio = _remoto(str(errore))
             _console.print(
-                f"[red]L'endpoint del testo non risponde correttamente: {messaggio}[/red]"
+                f"[red]La diagnosi dell'endpoint del testo non è riuscita: {messaggio}[/red]"
             )
             raise typer.Exit(code=1) from None
 
@@ -351,71 +399,119 @@ def doctor() -> None:
 
 
 @app.command()
+def stato() -> None:
+    """Mostra localmente quota, cooldown, incidente e telemetria aggregata.
+
+    Non costruisce un client HTTP e non effettua alcuna richiesta a Normattiva.
+    """
+    try:
+        protezione = ProtezioneTraffico(Config.da_ambiente())
+        rapporto = protezione.stato()
+        diagnosi = protezione.stato(attivita="diagnosi")
+        aggregati = protezione.aggregati_giornalieri()
+    except NormattivaErrore as errore:
+        _stampa_errore(errore)
+        raise typer.Exit(code=1) from None
+
+    _console.print("[bold]Stato locale della protezione di rete[/bold]")
+    _console.print(f"Consultazioni: {rapporto.consumo_attivita}")
+    _console.print(f"Diagnosi: {diagnosi.consumo_attivita}")
+    _console.print(f"Totale: {rapporto.consumo_globale}")
+    _console.print(f"Richieste residue: {rapporto.richieste_residue}")
+    _console.print(f"Livello: {rapporto.livello}")
+    _console.print(f"Cooldown: {rapporto.cooldown_fino or 'nessuno'}")
+    _console.print(f"Ultimo incidente: {rapporto.ultimo_incidente or 'nessuno'}")
+    _console.print(
+        "Oggi (UTC): "
+        f"{aggregati['richieste_reali']} richieste reali, "
+        f"{aggregati['cache_hit']} cache hit, "
+        f"{aggregati['errori']} errori, "
+        f"picco {aggregati['massimo_in_un_ora']}/ora"
+    )
+
+
+@app.command()
 def verifica(
     tutte: bool = typer.Option(False, "--tutte", help="Verifica tutte le fonti della tabella."),
+    esegui: bool = typer.Option(
+        False,
+        "--esegui",
+        help="Esegue la verifica completa dopo aver prenotato l'intero budget stimato.",
+    ),
 ) -> None:
-    """Interroga l'API per ogni fonte, distinguendo un'avaria del
-    servizio da una riga davvero sbagliata (CLAUDE.md, la disciplina che
-    ha già scoperto due errori storici nella tabella).
+    """Verifica tutte le fonti esclusivamente su esplicita conferma CLI.
 
-    Prima di giudicare qualunque fonte, prova una sonda di salute: se
-    fallisce, si ferma subito senza emettere nessun verdetto — un'avaria
-    non deve mai tradursi in righe marcate come sbagliate.
+    Il costo dichiarato è una richiesta per fonte e non include sonde: non
+    esiste qui una sonda nascosta che possa eccedere il budget prenotato.
     """
     if not tutte:
         _console.print("Usa --tutte per verificare l'intera tabella (fa decine di richieste).")
         raise typer.Exit(code=1)
 
     tabella = carica_tabella()
+    costo = len(tabella.verificate)
+    if not esegui:
+        _console.print(
+            f"Costo stimato: fino a {costo} richieste reali (una per fonte, nessuna sonda). "
+            "Per iniziare usa `norm verifica --tutte --esegui`."
+        )
+        return
 
-    with _nuovo_client() as client:
-        sonda = analizza_urn("urn:nir:stato:costituzione:1947-12-27;1~art1")
+    with _client_o_esci() as client:
         try:
-            esito_sonda = client.leggi_articolo(sonda)
+            assert client.protezione is not None
+            prenotazione = client.protezione.prenota_verifica(costo)
         except NormattivaErrore as errore:
-            _console_errori.print(
-                f"[red]Il servizio è in avaria adesso ({_remoto(str(errore))}): "
-                "nessuna riga è stata giudicata, riprova più tardi.[/red]"
-            )
+            _stampa_errore(errore)
             raise typer.Exit(code=1) from None
-        if not isinstance(esito_sonda, Articolo):
-            _console_errori.print(
-                "[red]Il servizio risponde in modo inatteso alla sonda di salute: "
-                "nessuna riga è stata giudicata, riprova più tardi.[/red]"
-            )
-            raise typer.Exit(code=1)
 
         table = Table(title="Verifica delle fonti")
         table.add_column("Fonte")
         table.add_column("Esito")
         righe_rosse = 0
         righe_non_verificate = 0
-        for f in tabella.verificate:
-            try:
-                esito = client.leggi_articolo(f.urn_di_controllo())
-            except NormattivaErrore as errore:
-                # Un errore durante il giro (non alla sonda iniziale) è
-                # trattato come "non verificata", mai come "sbagliata":
-                # potrebbe essere un'avaria isolata su quella singola
-                # richiesta, non un giudizio sulla riga.
-                table.add_row(
-                    f.nome_canonico, f"[yellow]non verificata ({_remoto(str(errore))})[/yellow]"
-                )
-                righe_non_verificate += 1
-                continue
-            if isinstance(esito, Articolo):
-                table.add_row(f.nome_canonico, "[green]verde[/green]")
-            else:
-                table.add_row(f.nome_canonico, f"[red]da controllare: {type(esito).__name__}[/red]")
-                righe_rosse += 1
+        completa = True
+        try:
+            for f in tabella.verificate:
+                try:
+                    esito = client.leggi_articolo(
+                        f.urn_di_controllo(),
+                        attivita="verifica",
+                        aggiorna=True,
+                        prenotazione=prenotazione,
+                        recupera_storico=False,
+                    )
+                except NormattivaErrore as errore:
+                    # Un errore è sempre "non verificata", mai una prova che
+                    # la fonte sia errata. Se il coordinatore blocca il giro,
+                    # fermarsi è l'unico comportamento prudente.
+                    table.add_row(
+                        f.nome_canonico,
+                        f"[yellow]non verificata ({_remoto(str(errore))})[/yellow]",
+                    )
+                    righe_non_verificate += 1
+                    if client.ultimo_rapporto.livello == "bloccato":
+                        completa = False
+                        break
+                    continue
+                if isinstance(esito, Articolo):
+                    table.add_row(f.nome_canonico, "[green]verde[/green]")
+                else:
+                    table.add_row(
+                        f.nome_canonico,
+                        f"[red]da controllare: {type(esito).__name__}[/red]",
+                    )
+                    righe_rosse += 1
+        finally:
+            client.protezione.chiudi_prenotazione(prenotazione, completa=completa)
 
-        _console.print(table)
-        if righe_rosse or righe_non_verificate:
-            _console_errori.print(
-                f"[yellow]{righe_rosse} riga/e da controllare, "
-                f"{righe_non_verificate} non verificate.[/yellow]"
-            )
-            raise typer.Exit(code=1)
+    _console.print(table)
+    if righe_rosse or righe_non_verificate or not completa:
+        _console_errori.print(
+            f"[yellow]{righe_rosse} riga/e da controllare, "
+            f"{righe_non_verificate} non verificate.[/yellow]"
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command(name="fonti-aggiungi")

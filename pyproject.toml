@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "normattiva-mcp"
-version = "0.1.1"
+version = "0.2.0"
 description = "CLI e server MCP per leggere, verificare e citare norme italiane da Normattiva.it"
 readme = "README.md"
 license = { text = "MIT" }
@@ -30,6 +30,14 @@ packages = ["src/normattiva_mcp"]
 
 [tool.hatch.build]
 include = ["src/normattiva_mcp/**/*.py", "src/normattiva_mcp/data/**/*"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/normattiva_mcp/**/*.py",
+  "src/normattiva_mcp/data/**/*",
+  "skills/**/*",
+  "tests/**/*",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers -m 'not live'"
