@@ -315,6 +315,20 @@ dell'infrastruttura, sia con una limitazione individuale o un problema di
 percorso. Non prova quale delle ipotesi fosse vera e non giustifica alcun
 tentativo da una rete o da un IP diverso.
 
+### 7.4 Quinta osservazione, 04/09/2026: esito diverso secondo l'uscita di rete
+
+Durante una successiva verifica, le API risultavano raggiungibili usando una
+VPN o la rete cellulare, mentre continuavano a non rispondere attraverso l'IP
+statico abituale. Il confronto nello stesso contesto rende poco probabile
+un'indisponibilità generale del servizio e costituisce un indizio forte di una
+limitazione associata all'IP sorgente o al percorso di rete.
+
+L'osservazione non dimostra da sola un ban intenzionale: restano compatibili un
+filtro WAF o di reputazione, un problema di routing selettivo o un'anomalia del
+provider. Le uscite alternative sono state utili per la diagnosi, non
+autorizzano a proseguire le consultazioni dopo un rifiuto. Cooldown, quote e
+contatori restano condivisi e non vengono azzerati cambiando IP, VPN o rete.
+
 ## 8. Prestazioni generali
 
 ~800 richieste reali documentate fra agosto e il 29 agosto 2026: mediana
