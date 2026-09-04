@@ -93,6 +93,15 @@ funzione, fuso su `main` prima del successivo. Prima di committare: leggere
 `git diff --staged` per intero, verificare che test e lint passino, includere
 test e documentazione nello stesso commit del codice che descrivono.
 
+## Regole di release
+
+Il titolo della release GitHub contiene soltanto il tag di versione (`vX.Y.Z`),
+senza commenti. Le note includono sempre il comando `uv tool install` puntato
+alla wheel della stessa release e dichiarano che installa sia `norm` sia
+`norm-mcp`. Si allegano wheel e sdist ricostruiti dal commit taggato, con i
+relativi SHA-256. `logs/`, database e telemetria locale non entrano mai nella
+release.
+
 ## Come si esegue
 
 ```sh
