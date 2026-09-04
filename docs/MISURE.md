@@ -277,8 +277,9 @@ irraggiungibile. Stavolta è stato possibile isolare la causa con due
 controlli mirati (browser Chrome reale non disponibile in questo giro:
 l'estensione claude-in-chrome non risultava connessa):
 
-- **`dig +short www.normattiva.it`**: risolve regolarmente a
-  `147.78.212.12`. Non è un fallimento DNS.
+- **`dig +short www.normattiva.it`**: restituisce regolarmente un indirizzo
+  IPv4. Non è un fallimento DNS. L'indirizzo non viene conservato nel
+  repository.
 - **`curl -v` verso quell'IP sulla 443**: `ipv4 connect timeout after
   3959ms`, poi timeout totale a 8 s — il pacchetto SYN non riceve
   risposta, non è un rifiuto TLS/applicativo.

@@ -70,6 +70,10 @@ numero di riga: i numeri invecchiano, i nomi no.
 9. **I limiti sono locali.** Le soglie 30/2/60 sono cautele del progetto,
    non limiti dichiarati da Normattiva; possono solo essere ridotte. Prima di
    aumentare volume o servire terzi servono istruzioni scritte del gestore.
+10. **Mai salvare indirizzi IP.** File tracciati, fixture, documentazione,
+    note e asset di release non contengono indirizzi IP personali, locali o
+    remoti; si usano descrizioni non identificanti. Log e telemetria restano
+    esclusi dal repository.
 
 ## Struttura e stile del codice
 
