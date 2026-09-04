@@ -294,9 +294,10 @@ applica il cooldown e non tenta di aggirarlo cambiando rete o IP.
 
 ### 7.3 Quarta osservazione, 29/08/2026: irraggiungibile anche in HTTP puro (porta 80)
 
-Nuova sessione, stesso giorno, `normattiva.it` ancora giù. Per escludere
-che il problema fosse specifico di TLS/443, ripetuto il test anche sulla
-porta 80 (HTTP semplice, senza handshake TLS):
+Nuova sessione, stesso giorno: `normattiva.it` continuava a non rispondere
+da quel client. Per verificare se il sintomo fosse specifico di TLS/443,
+il test fu ripetuto anche sulla porta 80 (HTTP semplice, senza handshake
+TLS):
 
 - **TCP verso la 443** (sia `api.normattiva.it` che `www.normattiva.it`):
   connessione fallita (timeout), come in §7.2.
@@ -305,13 +306,14 @@ porta 80 (HTTP semplice, senza handshake TLS):
   risposta, timeout a 10 s.
 - **Controllo nello stesso istante**: DNS di entrambi gli host risolve
   regolarmente, e `google.com` risponde `200` in meno di un secondo — la
-  rete locale non è la causa.
+  connettività generale della macchina era funzionante.
 
-**Conclusione più precisa di §7.2**: non è un problema del solo TLS/443 —
-l'host non risponde su nessuna porta web standard, né 80 né 443. Questo
-rafforza l'ipotesi di un'interruzione a livello di rete/infrastruttura
-lato Normattiva (o a monte di essa), non di un singolo servizio o
-protocollo applicativo.
+**Conclusione prudente**: il sintomo non era limitato al solo TLS/443,
+perché da quel client non arrivava risposta né sulla porta 80 né sulla
+443. L'osservazione resta compatibile sia con un'interruzione generale
+dell'infrastruttura, sia con una limitazione individuale o un problema di
+percorso. Non prova quale delle ipotesi fosse vera e non giustifica alcun
+tentativo da una rete o da un IP diverso.
 
 ## 8. Prestazioni generali
 
